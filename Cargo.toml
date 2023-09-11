@@ -1,0 +1,23 @@
+[package]
+authors = ["Johan Helsing <johanhelsing@gmail.com>"]
+categories = ["game-development"]
+description = "Rollback safe utilities and abstractions for Bevy"
+edition = "2021"
+keywords = ["gamedev", "bevy"]
+license = "MIT OR Apache-2.0"
+name = "bevy_roll"
+repository = "https://github.com/johanhelsing/bevy_roll"
+version = "0.1.0"
+
+[features]
+default = ["bevy_ggrs", "math_determinism"]
+bevy_ggrs = ["dep:bevy_ggrs"]
+math_determinism = ["glam/libm"]
+
+[dependencies]
+bevy = {version = "0.11", default-features = false}
+bevy_ggrs = {version = "0.13", optional = true, default-features = false}
+glam = "0.24" # same as Bevy 0.11
+
+[patch.crates-io]
+bevy = { git = "https://github.com/johanhelsing/bevy", branch = "reflect-states-0.11"}
