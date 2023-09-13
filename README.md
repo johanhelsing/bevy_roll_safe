@@ -28,6 +28,7 @@ See the `states` example for usage with [`bevy_ggrs`].
 ## Cargo features
 
 - `bevy_ggrs`: Enable integration with [`bevy_ggrs`]
+- `math_determinism`: Enable cross-platform determinism for operations on Bevy's (`glam`) math types.
 
 ## Bevy Version Support
 
