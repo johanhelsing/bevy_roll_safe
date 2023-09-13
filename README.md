@@ -1,8 +1,8 @@
-# bevy_roll
+# bevy_roll_safe
 
 ![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)
 
-Rollback-safe implementations/replacements for Bevy Engine.
+Rollback-safe implementations and utilities for Bevy Engine.
 
 ## Motivation
 
@@ -13,7 +13,6 @@ A number of Bevy's features can't be used in a rollback context (with crates suc
 - [x] States
 - [x] FrameCount
 - [ ] Events
-- [ ] Timers
 
 ## States
 
@@ -32,17 +31,13 @@ See the `states` example for usage with `bevy_ggrs`.
 
 ## Bevy Version Support
 
-The `main` branch targets the latest bevy release.
-
-I intend to support the `main` branch of Bevy in the `bevy-main` branch.
-
-|bevy|bevy_roll|
-|----|---------|
-|none|main     |
+|bevy                                 |bevy_roll_safe|
+|-------------------------------------|--------------|
+|johanhelsing/bevy#reflect-states-0.11|main          |
 
 ## License
 
-`bevy_roll` is dual-licensed under either
+`bevy_roll_safe` is dual-licensed under either
 
 - MIT License (./LICENSE-MIT or http://opensource.org/licenses/MIT)
 - Apache License, Version 2.0 (./LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)

@@ -5,8 +5,8 @@ description = "Rollback safe utilities and abstractions for Bevy"
 edition = "2021"
 keywords = ["gamedev", "bevy"]
 license = "MIT OR Apache-2.0"
-name = "bevy_roll"
-repository = "https://github.com/johanhelsing/bevy_roll"
+name = "bevy_roll_safe"
+repository = "https://github.com/johanhelsing/bevy_roll_safe"
 version = "0.1.0"
 
 [features]

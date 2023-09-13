@@ -6,7 +6,7 @@ use bevy_ggrs::{
     prelude::*,
     GgrsAppExtension,
 };
-use bevy_roll::prelude::*;
+use bevy_roll_safe::prelude::*;
 
 #[derive(Debug)]
 pub struct GgrsConfig;
