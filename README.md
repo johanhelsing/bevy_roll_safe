@@ -6,7 +6,7 @@ Rollback-safe implementations and utilities for Bevy Engine.
 
 ## Motivation
 
-Some of Bevy's features can't be used in a rollback context (with crates such as [`bevy_ggrs`]). This is either because they behave non-deterministically, don't implement reflect, rely on local system state, or are tightly coupled to the `Main` schedule.
+Some of Bevy's features can't be used in a rollback context (with crates such as [`bevy_ggrs`]). This is either because they behave non-deterministically, don't implement `Reflect`, rely on local system state, or are tightly coupled to the `Main` schedule.
 
 ## Roadmap
 
