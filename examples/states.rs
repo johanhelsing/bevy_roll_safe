@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*};
+use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, utils::HashMap};
 use bevy_ggrs::{
     ggrs::{Config, PlayerType, SessionBuilder},
     prelude::*,
@@ -16,14 +16,13 @@ impl Config for GgrsConfig {
     type Address = String;
 }
 
-pub fn read_local_input(
-    local_players: Res<LocalPlayers>,
-    mut local_inputs: ResMut<LocalInputs<GgrsConfig>>,
-) {
-    local_inputs.0.clear();
+pub fn read_local_input(mut commands: Commands, local_players: Res<LocalPlayers>) {
+    dbg!(&local_players.0);
+    let mut local_inputs = HashMap::new();
     for handle in &local_players.0 {
-        local_inputs.0.insert(*handle, 0);
+        local_inputs.insert(*handle, 0);
     }
+    commands.insert_resource(LocalInputs::<GgrsConfig>(local_inputs));
 }
 
 #[derive(States, Reflect, Hash, Default, Debug, Eq, PartialEq, Clone)]
