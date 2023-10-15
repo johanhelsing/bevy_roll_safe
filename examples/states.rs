@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*};
 use bevy_ggrs::{
-    ggrs::{Config, PlayerHandle, PlayerType, SessionBuilder},
+    ggrs::{Config, PlayerType, SessionBuilder},
     prelude::*,
-    GgrsAppExtension,
+    LocalInputs, LocalPlayers,
 };
 use bevy_roll_safe::prelude::*;
 
@@ -16,8 +16,14 @@ impl Config for GgrsConfig {
     type Address = String;
 }
 
-pub fn input(_handle: In<PlayerHandle>) -> u8 {
-    0
+pub fn read_local_input(
+    local_players: Res<LocalPlayers>,
+    mut local_inputs: ResMut<LocalInputs<GgrsConfig>>,
+) {
+    local_inputs.0.clear();
+    for handle in &local_players.0 {
+        local_inputs.0.insert(*handle, 0);
+    }
 }
 
 #[derive(States, Reflect, Hash, Default, Debug, Eq, PartialEq, Clone)]
@@ -47,14 +53,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session = session.start_synctest_session()?;
 
     App::new()
-        .add_ggrs_plugin(
-            GgrsPlugin::<GgrsConfig>::new()
-                .with_update_frequency(60)
-                .with_input_system(input)
-                .register_rollback_component::<Health>()
-                // Register the state's resources so GGRS can roll them back
-                .register_roll_state::<GameplayState>(),
-        )
+        .add_plugins(GgrsPlugin::<GgrsConfig>::default())
+        .set_rollback_schedule_fps(60)
+        .add_systems(ReadInputs, read_local_input)
+        .register_rollback_component::<Health>()
+        // Register the state's resources so GGRS can roll them back
+        .register_ggrs_state::<GameplayState>()
         .add_plugins((
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
                 1.0 / 10.0,

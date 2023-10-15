@@ -5,7 +5,7 @@ use bevy::{
     prelude::*,
 };
 #[cfg(feature = "bevy_ggrs")]
-use bevy_ggrs::{ggrs::Config, GgrsPlugin};
+use bevy_ggrs::GgrsApp;
 
 mod frame_count;
 
@@ -14,13 +14,17 @@ pub use frame_count::{increase_frame_count, RollFrameCount};
 
 pub mod prelude {
     pub use super::RollApp;
-    #[cfg(feature = "bevy_ggrs")]
-    pub use super::RollGgrsPlugin;
 }
 
 pub trait RollApp {
     /// Add state transitions to the given schedule
     fn add_roll_state<S: States>(&mut self, schedule: impl ScheduleLabel) -> &mut Self;
+
+    #[cfg(feature = "bevy_ggrs")]
+    /// Register this state to be rolled back by bevy_ggrs
+    fn register_ggrs_state<S: States + GetTypeRegistration + FromReflect + TypePath>(
+        &mut self,
+    ) -> &mut Self;
 }
 
 impl RollApp for App {
@@ -39,6 +43,15 @@ impl RollApp for App {
                     .chain(),
             )
     }
+
+    #[cfg(feature = "bevy_ggrs")]
+    fn register_ggrs_state<S: States + GetTypeRegistration + FromReflect + TypePath>(
+        &mut self,
+    ) -> &mut Self {
+        self.register_rollback_resource::<State<S>>()
+            .register_rollback_resource::<NextState<S>>()
+            .register_rollback_resource::<InitialStateEntered<S>>()
+    }
 }
 
 #[derive(Resource, Debug, Reflect, Default, Eq, PartialEq)]
@@ -47,19 +60,4 @@ pub struct InitialStateEntered<S: States>(Option<S>); // todo: PhantomData inste
 
 fn mark_state_initialized<S: States>(mut state_initialized: ResMut<InitialStateEntered<S>>) {
     state_initialized.0 = Some(default());
-}
-
-#[cfg(feature = "bevy_ggrs")]
-pub trait RollGgrsPlugin {
-    /// Register this state to be rolled back
-    fn register_roll_state<S: States + GetTypeRegistration + FromReflect + TypePath>(self) -> Self;
-}
-
-#[cfg(feature = "bevy_ggrs")]
-impl<T: Config + Send + Sync> RollGgrsPlugin for GgrsPlugin<T> {
-    fn register_roll_state<S: States + GetTypeRegistration + FromReflect + TypePath>(self) -> Self {
-        self.register_rollback_resource::<State<S>>()
-            .register_rollback_resource::<NextState<S>>()
-            .register_rollback_resource::<InitialStateEntered<S>>()
-    }
 }
