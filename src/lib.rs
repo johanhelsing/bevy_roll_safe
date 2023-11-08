@@ -18,7 +18,7 @@ pub trait RollApp {
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
-    fn register_ggrs_state<S: States + Clone>(&mut self) -> &mut Self;
+    fn add_ggrs_state<S: States + Clone>(&mut self) -> &mut Self;
 }
 
 impl RollApp for App {
@@ -39,11 +39,11 @@ impl RollApp for App {
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn register_ggrs_state<S: States + Clone>(&mut self) -> &mut Self {
-        use bevy_ggrs::{CloneStrategy, ResourceSnapshotPlugin, Strategy};
+    fn add_ggrs_state<S: States + Clone>(&mut self) -> &mut Self {
+        use bevy_ggrs::{CloneStrategy, GgrsSchedule, ResourceSnapshotPlugin, Strategy};
         use std::marker::PhantomData;
 
-        self.add_plugins((
+        self.add_roll_state::<S>(GgrsSchedule).add_plugins((
             ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
@@ -51,6 +51,7 @@ impl RollApp for App {
 
         struct StateStrategy<S: States>(PhantomData<S>);
 
+        // todo: make State<S> implement clone instead
         impl<S: States> Strategy for StateStrategy<S> {
             type Target = State<S>;
             type Stored = S;
@@ -65,6 +66,8 @@ impl RollApp for App {
         }
 
         struct NextStateStrategy<S: States>(PhantomData<S>);
+
+        // todo: make NextState<S> implement clone instead
         impl<S: States> Strategy for NextStateStrategy<S> {
             type Target = NextState<S>;
             type Stored = Option<S>;

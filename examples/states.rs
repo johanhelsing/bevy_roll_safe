@@ -32,8 +32,8 @@ pub enum GameplayState {
     GameOver,
 }
 
-/// Player health. Implements and reflects Hash so it will be used in the ggrs state checksums
-#[derive(Component, Reflect, Hash, Debug)]
+/// Player health
+#[derive(Component, Reflect, Hash, Debug, Clone, Copy)]
 #[reflect(Component, Hash)]
 pub struct Health(u32);
 
@@ -55,17 +55,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_plugins(GgrsPlugin::<GgrsConfig>::default())
         .set_rollback_schedule_fps(60)
         .add_systems(ReadInputs, read_local_input)
-        .register_rollback_component::<Health>()
-        // Register the state's resources so GGRS can roll them back
-        .register_ggrs_state::<GameplayState>()
+        .rollback_component_with_copy::<Health>()
+        .checksum_component_with_hash::<Health>()
+        // Add the state transition to the ggrs schedule and register it for rollback
+        .add_ggrs_state::<GameplayState>()
         .add_plugins((
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
                 1.0 / 10.0,
             ))),
             LogPlugin::default(),
         ))
-        // Add the state to a specific schedule, in this case the GgrsSchedule
-        .add_roll_state::<GameplayState>(GgrsSchedule)
         .add_systems(OnEnter(GameplayState::InRound), spawn_player)
         .add_systems(OnEnter(GameplayState::GameOver), log_game_over)
         .add_systems(
@@ -90,12 +89,15 @@ fn decrease_health(
     mut players: Query<(Entity, &mut Health)>,
     mut state: ResMut<NextState<GameplayState>>,
 ) {
+    // this system should never run in the GameOver state,
+    // so single_mut is safe to use
     let (player_entity, mut health) = players.single_mut();
 
     health.0 = health.0.saturating_sub(1);
     info!("{health:?}");
 
     if health.0 == 0 {
+        info!("despawning player, setting GameOver state");
         commands.entity(player_entity).despawn_recursive();
         state.set(GameplayState::GameOver);
     }
