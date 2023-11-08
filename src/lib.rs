@@ -1,11 +1,7 @@
-#[cfg(feature = "bevy_ggrs")]
-use bevy::reflect::{GetTypeRegistration, TypePath};
 use bevy::{
     ecs::schedule::{run_enter_schedule, ScheduleLabel},
     prelude::*,
 };
-#[cfg(feature = "bevy_ggrs")]
-use bevy_ggrs::GgrsApp;
 
 mod frame_count;
 
@@ -22,9 +18,7 @@ pub trait RollApp {
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
-    fn register_ggrs_state<S: States + GetTypeRegistration + FromReflect + TypePath>(
-        &mut self,
-    ) -> &mut Self;
+    fn register_ggrs_state<S: States + Clone>(&mut self) -> &mut Self;
 }
 
 impl RollApp for App {
@@ -45,16 +39,50 @@ impl RollApp for App {
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn register_ggrs_state<S: States + GetTypeRegistration + FromReflect + TypePath>(
-        &mut self,
-    ) -> &mut Self {
-        self.register_rollback_resource::<State<S>>()
-            .register_rollback_resource::<NextState<S>>()
-            .register_rollback_resource::<InitialStateEntered<S>>()
+    fn register_ggrs_state<S: States + Clone>(&mut self) -> &mut Self {
+        use bevy_ggrs::{CloneStrategy, ResourceSnapshotPlugin, Strategy};
+        use std::marker::PhantomData;
+
+        self.add_plugins((
+            ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
+            ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
+            ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
+        ));
+
+        struct StateStrategy<S: States>(PhantomData<S>);
+
+        impl<S: States> Strategy for StateStrategy<S> {
+            type Target = State<S>;
+            type Stored = S;
+
+            fn store(target: &Self::Target) -> Self::Stored {
+                target.get().to_owned()
+            }
+
+            fn load(stored: &Self::Stored) -> Self::Target {
+                State::new(stored.to_owned())
+            }
+        }
+
+        struct NextStateStrategy<S: States>(PhantomData<S>);
+        impl<S: States> Strategy for NextStateStrategy<S> {
+            type Target = NextState<S>;
+            type Stored = Option<S>;
+
+            fn store(target: &Self::Target) -> Self::Stored {
+                target.0.to_owned()
+            }
+
+            fn load(stored: &Self::Stored) -> Self::Target {
+                NextState(stored.to_owned())
+            }
+        }
+
+        self
     }
 }
 
-#[derive(Resource, Debug, Reflect, Default, Eq, PartialEq)]
+#[derive(Resource, Debug, Reflect, Default, Eq, PartialEq, Clone)]
 #[reflect(Resource)]
 pub struct InitialStateEntered<S: States>(Option<S>); // todo: PhantomData instead?
 

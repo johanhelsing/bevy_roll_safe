@@ -15,7 +15,7 @@ bevy_ggrs = ["dep:bevy_ggrs"]
 math_determinism = ["glam/libm"]
 
 [dependencies]
-bevy = {version = "0.11", default-features = false}
+bevy = {version = "0.12", default-features = false}
 # bevy_ggrs = {version = "0.13", optional = true, default-features = false}
 bevy_ggrs = {git = "https://github.com/gschup/bevy_ggrs", optional = true, default-features = false}
 glam = "0.24" # same as Bevy 0.11
