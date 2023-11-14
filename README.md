@@ -1,12 +1,14 @@
 # bevy_roll_safe
 
+[![crates.io](https://img.shields.io/crates/v/bevy_roll_safe.svg)](https://crates.io/crates/bevy_roll_safe)
 ![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)
+[![docs.rs](https://img.shields.io/docsrs/bevy_roll_safe)](https://docs.rs/bevy_roll_safe)
 
 Rollback-safe implementations and utilities for Bevy Engine.
 
 ## Motivation
 
-Some of Bevy's features can't be used in a rollback context (with crates such as [`bevy_ggrs`]). This is either because they behave non-deterministically, don't implement `Reflect`, rely on local system state, or are tightly coupled to the `Main` schedule.
+Some of Bevy's features can't be used in a rollback context (with crates such as [`bevy_ggrs`]). This is either because they behave non-deterministically, rely on inaccessible local system state, or are tightly coupled to the `Main` schedule.
 
 ## Roadmap
 
@@ -32,16 +34,16 @@ See the [`states`](https://github.com/johanhelsing/bevy_roll_safe/blob/main/exam
 
 ## Bevy Version Support
 
-|bevy                                 |bevy_roll_safe|
-|-------------------------------------|--------------|
-|johanhelsing/bevy#reflect-states-0.11|main          |
+|bevy|bevy_roll_safe|
+|----|--------------|
+|0.12|0.1, main     |
 
 ## License
 
 `bevy_roll_safe` is dual-licensed under either
 
-- MIT License (./LICENSE-MIT or http://opensource.org/licenses/MIT)
-- Apache License, Version 2.0 (./LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT License (./LICENSE-MIT or <http://opensource.org/licenses/MIT>)
+- Apache License, Version 2.0 (./LICENSE-APACHE or <http://www.apache.org/licenses/LICENSE-2.0>)
 
 at your option.
 

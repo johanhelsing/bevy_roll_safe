@@ -15,9 +15,6 @@ bevy_ggrs = ["dep:bevy_ggrs"]
 math_determinism = ["glam/libm"]
 
 [dependencies]
-bevy = {version = "0.11", default-features = false}
-bevy_ggrs = {version = "0.13", optional = true, default-features = false}
-glam = "0.24" # same as Bevy 0.11
-
-[patch.crates-io]
-bevy = { git = "https://github.com/johanhelsing/bevy", branch = "reflect-states-0.11"}
+bevy = { version = "0.12", default-features = false }
+bevy_ggrs = { version = "0.14", optional = true, default-features = false }
+glam = "0.24" # same as Bevy 0.12

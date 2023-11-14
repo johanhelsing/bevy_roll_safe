@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*};
+use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, utils::HashMap};
 use bevy_ggrs::{
-    ggrs::{Config, PlayerHandle, PlayerType, SessionBuilder},
+    ggrs::{Config, PlayerType, SessionBuilder},
     prelude::*,
-    GgrsAppExtension,
+    LocalInputs, LocalPlayers,
 };
 use bevy_roll_safe::prelude::*;
 
@@ -16,8 +16,13 @@ impl Config for GgrsConfig {
     type Address = String;
 }
 
-pub fn input(_handle: In<PlayerHandle>) -> u8 {
-    0
+pub fn read_local_input(mut commands: Commands, local_players: Res<LocalPlayers>) {
+    dbg!(&local_players.0);
+    let mut local_inputs = HashMap::new();
+    for handle in &local_players.0 {
+        local_inputs.insert(*handle, 0);
+    }
+    commands.insert_resource(LocalInputs::<GgrsConfig>(local_inputs));
 }
 
 #[derive(States, Reflect, Hash, Default, Debug, Eq, PartialEq, Clone)]
@@ -27,8 +32,8 @@ pub enum GameplayState {
     GameOver,
 }
 
-/// Player health. Implements and reflects Hash so it will be used in the ggrs state checksums
-#[derive(Component, Reflect, Hash, Debug)]
+/// Player health
+#[derive(Component, Reflect, Hash, Debug, Clone, Copy)]
 #[reflect(Component, Hash)]
 pub struct Health(u32);
 
@@ -47,22 +52,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session = session.start_synctest_session()?;
 
     App::new()
-        .add_ggrs_plugin(
-            GgrsPlugin::<GgrsConfig>::new()
-                .with_update_frequency(60)
-                .with_input_system(input)
-                .register_rollback_component::<Health>()
-                // Register the state's resources so GGRS can roll them back
-                .register_roll_state::<GameplayState>(),
-        )
+        .add_plugins(GgrsPlugin::<GgrsConfig>::default())
+        .set_rollback_schedule_fps(60)
+        .add_systems(ReadInputs, read_local_input)
+        .rollback_component_with_copy::<Health>()
+        .checksum_component_with_hash::<Health>()
+        // Add the state transition to the ggrs schedule and register it for rollback
+        .add_ggrs_state::<GameplayState>()
         .add_plugins((
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
                 1.0 / 10.0,
             ))),
             LogPlugin::default(),
         ))
-        // Add the state to a specific schedule, in this case the GgrsSchedule
-        .add_roll_state::<GameplayState>(GgrsSchedule)
         .add_systems(OnEnter(GameplayState::InRound), spawn_player)
         .add_systems(OnEnter(GameplayState::GameOver), log_game_over)
         .add_systems(
@@ -87,12 +89,15 @@ fn decrease_health(
     mut players: Query<(Entity, &mut Health)>,
     mut state: ResMut<NextState<GameplayState>>,
 ) {
+    // this system should never run in the GameOver state,
+    // so single_mut is safe to use
     let (player_entity, mut health) = players.single_mut();
 
     health.0 = health.0.saturating_sub(1);
     info!("{health:?}");
 
     if health.0 == 0 {
+        info!("despawning player, setting GameOver state");
         commands.entity(player_entity).despawn_recursive();
         state.set(GameplayState::GameOver);
     }
