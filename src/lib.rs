@@ -19,6 +19,13 @@ pub trait RollApp {
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
     fn add_ggrs_state<S: States + Clone>(&mut self) -> &mut Self;
+
+    #[cfg(feature = "bevy_ggrs")]
+    /// Register this state to be rolled back by bevy_ggrs in the specified schedule
+    fn add_ggrs_state_to_schedule<S: States + Clone>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> &mut Self;
 }
 
 impl RollApp for App {
@@ -40,48 +47,62 @@ impl RollApp for App {
 
     #[cfg(feature = "bevy_ggrs")]
     fn add_ggrs_state<S: States + Clone>(&mut self) -> &mut Self {
-        use bevy_ggrs::{CloneStrategy, GgrsSchedule, ResourceSnapshotPlugin, Strategy};
-        use std::marker::PhantomData;
+        use bevy_ggrs::GgrsSchedule;
+        self.add_ggrs_state_to_schedule::<S>(GgrsSchedule)
+    }
 
-        self.add_roll_state::<S>(GgrsSchedule).add_plugins((
+    #[cfg(feature = "bevy_ggrs")]
+    fn add_ggrs_state_to_schedule<S: States + Clone>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> &mut Self {
+        use crate::ggrs_support::{NextStateStrategy, StateStrategy};
+        use bevy_ggrs::{CloneStrategy, ResourceSnapshotPlugin};
+
+        self.add_roll_state::<S>(schedule).add_plugins((
             ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
-        ));
+        ))
+    }
+}
 
-        struct StateStrategy<S: States>(PhantomData<S>);
+#[cfg(feature = "bevy_ggrs")]
+mod ggrs_support {
+    use bevy::prelude::*;
+    use bevy_ggrs::Strategy;
+    use std::marker::PhantomData;
 
-        // todo: make State<S> implement clone instead
-        impl<S: States> Strategy for StateStrategy<S> {
-            type Target = State<S>;
-            type Stored = S;
+    pub(crate) struct StateStrategy<S: States>(PhantomData<S>);
 
-            fn store(target: &Self::Target) -> Self::Stored {
-                target.get().to_owned()
-            }
+    // todo: make State<S> implement clone instead
+    impl<S: States> Strategy for StateStrategy<S> {
+        type Target = State<S>;
+        type Stored = S;
 
-            fn load(stored: &Self::Stored) -> Self::Target {
-                State::new(stored.to_owned())
-            }
+        fn store(target: &Self::Target) -> Self::Stored {
+            target.get().to_owned()
         }
 
-        struct NextStateStrategy<S: States>(PhantomData<S>);
+        fn load(stored: &Self::Stored) -> Self::Target {
+            State::new(stored.to_owned())
+        }
+    }
 
-        // todo: make NextState<S> implement clone instead
-        impl<S: States> Strategy for NextStateStrategy<S> {
-            type Target = NextState<S>;
-            type Stored = Option<S>;
+    pub(crate) struct NextStateStrategy<S: States>(PhantomData<S>);
 
-            fn store(target: &Self::Target) -> Self::Stored {
-                target.0.to_owned()
-            }
+    // todo: make NextState<S> implement clone instead
+    impl<S: States> Strategy for NextStateStrategy<S> {
+        type Target = NextState<S>;
+        type Stored = Option<S>;
 
-            fn load(stored: &Self::Stored) -> Self::Target {
-                NextState(stored.to_owned())
-            }
+        fn store(target: &Self::Target) -> Self::Stored {
+            target.0.to_owned()
         }
 
-        self
+        fn load(stored: &Self::Stored) -> Self::Target {
+            NextState(stored.to_owned())
+        }
     }
 }
 
