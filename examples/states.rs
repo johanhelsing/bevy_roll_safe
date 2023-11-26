@@ -2,22 +2,15 @@ use std::time::Duration;
 
 use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, utils::HashMap};
 use bevy_ggrs::{
-    ggrs::{Config, PlayerType, SessionBuilder},
+    ggrs::{PlayerType, SessionBuilder},
     prelude::*,
     LocalInputs, LocalPlayers,
 };
 use bevy_roll_safe::prelude::*;
 
-#[derive(Debug)]
-pub struct GgrsConfig;
-impl Config for GgrsConfig {
-    type Input = u8;
-    type State = u8;
-    type Address = String;
-}
+pub type GgrsConfig = bevy_ggrs::GgrsConfig<u8, String>;
 
 pub fn read_local_input(mut commands: Commands, local_players: Res<LocalPlayers>) {
-    dbg!(&local_players.0);
     let mut local_inputs = HashMap::new();
     for handle in &local_players.0 {
         local_inputs.insert(*handle, 0);
