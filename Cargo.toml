@@ -18,3 +18,7 @@ math_determinism = ["glam/libm"]
 bevy = { version = "0.12", default-features = false }
 bevy_ggrs = { version = "0.14", optional = true, default-features = false }
 glam = "0.24" # same as Bevy 0.12
+
+[dev-dependencies]
+strum = "0.25"
+strum_macros = "0.25"
