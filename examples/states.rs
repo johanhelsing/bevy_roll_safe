@@ -8,9 +8,9 @@ use bevy_ggrs::{
 };
 use bevy_roll_safe::prelude::*;
 
-pub type GgrsConfig = bevy_ggrs::GgrsConfig<u8, String>;
+type GgrsConfig = bevy_ggrs::GgrsConfig<u8, String>;
 
-pub fn read_local_input(mut commands: Commands, local_players: Res<LocalPlayers>) {
+fn read_local_input(mut commands: Commands, local_players: Res<LocalPlayers>) {
     let mut local_inputs = HashMap::new();
     for handle in &local_players.0 {
         local_inputs.insert(*handle, 0);
@@ -18,31 +18,24 @@ pub fn read_local_input(mut commands: Commands, local_players: Res<LocalPlayers>
     commands.insert_resource(LocalInputs::<GgrsConfig>(local_inputs));
 }
 
-#[derive(States, Reflect, Hash, Default, Debug, Eq, PartialEq, Clone)]
-pub enum GameplayState {
+#[derive(States, Hash, Default, Debug, Eq, PartialEq, Clone)]
+enum GameplayState {
     #[default]
     InRound,
     GameOver,
 }
 
 /// Player health
-#[derive(Component, Reflect, Hash, Debug, Clone, Copy)]
-#[reflect(Component, Hash)]
-pub struct Health(u32);
-
-impl Default for Health {
-    fn default() -> Self {
-        Self(10)
-    }
-}
+#[derive(Component, Hash, Debug, Clone, Copy)]
+struct Health(u32);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut session = SessionBuilder::<GgrsConfig>::new()
+    let session = SessionBuilder::<GgrsConfig>::new()
         .with_num_players(1)
         // each frame, roll back and resimulate 5 frames back in time, and compare checksums
-        .with_check_distance(5);
-    session = session.add_player(PlayerType::Local, 0)?;
-    let session = session.start_synctest_session()?;
+        .with_check_distance(5)
+        .add_player(PlayerType::Local, 0)?
+        .start_synctest_session()?;
 
     App::new()
         .add_plugins(GgrsPlugin::<GgrsConfig>::default())
@@ -74,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn spawn_player(mut commands: Commands) {
     info!("spawning player");
-    commands.spawn(Health::default()).add_rollback();
+    commands.spawn(Health(10)).add_rollback();
 }
 
 fn decrease_health(
