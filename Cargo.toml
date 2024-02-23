@@ -12,9 +12,9 @@ version = "0.1.0"
 [features]
 default = ["bevy_ggrs", "math_determinism"]
 bevy_ggrs = ["dep:bevy_ggrs"]
-math_determinism = ["glam/libm"]
+math_determinism = ["bevy_math/libm"]
 
 [dependencies]
-bevy = { version = "0.12", default-features = false }
-bevy_ggrs = { version = "0.14", optional = true, default-features = false }
-glam = "0.24" # same as Bevy 0.12
+bevy = { version = "0.13", default-features = false }
+bevy_math = "0.13"
+bevy_ggrs = { git = "https://github.com/bushrat011899/bevy_ggrs", branch = "Bevy0.13Update", optional = true, default-features = false }
