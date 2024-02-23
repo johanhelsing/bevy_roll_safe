@@ -15,23 +15,27 @@ pub mod prelude {
 }
 
 pub trait RollApp {
-    /// Add state transitions to the given schedule
-    fn add_roll_state<S: States + FromWorld>(&mut self, schedule: impl ScheduleLabel) -> &mut Self;
+    /// Init state transitions in the given schedule
+    fn init_roll_state<S: States + FromWorld>(&mut self, schedule: impl ScheduleLabel)
+        -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
-    fn add_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self;
+    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs in the specified schedule
-    fn add_ggrs_state_to_schedule<S: States + FromWorld + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self;
 }
 
 impl RollApp for App {
-    fn add_roll_state<S: States + FromWorld>(&mut self, schedule: impl ScheduleLabel) -> &mut Self {
+    fn init_roll_state<S: States + FromWorld>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> &mut Self {
         self.init_resource::<NextState<S>>()
             .init_resource::<State<S>>()
             .init_resource::<InitialStateEntered<S>>()
@@ -49,20 +53,20 @@ impl RollApp for App {
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn add_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self {
+    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self {
         use bevy_ggrs::GgrsSchedule;
-        self.add_ggrs_state_to_schedule::<S>(GgrsSchedule)
+        self.init_ggrs_state_in_schedule::<S>(GgrsSchedule)
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn add_ggrs_state_to_schedule<S: States + FromWorld + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
         use crate::ggrs_support::{NextStateStrategy, StateStrategy};
         use bevy_ggrs::{CloneStrategy, ResourceSnapshotPlugin};
 
-        self.add_roll_state::<S>(schedule).add_plugins((
+        self.init_roll_state::<S>(schedule).add_plugins((
             ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
