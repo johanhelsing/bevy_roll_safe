@@ -36,9 +36,11 @@ impl RollApp for App {
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
-        self.init_resource::<NextState<S>>()
-            .init_resource::<State<S>>()
+        self.init_resource::<State<S>>()
+            .init_resource::<NextState<S>>()
             .init_resource::<InitialStateEntered<S>>()
+            // events are not rollback safe, but `apply_state_transition` will cause errors without it
+            .add_event::<StateTransitionEvent<S>>()
             .add_systems(
                 schedule,
                 (
