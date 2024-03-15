@@ -36,7 +36,8 @@ See the [`states`](https://github.com/johanhelsing/bevy_roll_safe/blob/main/exam
 
 |bevy|bevy_roll_safe|
 |----|--------------|
-|0.12|0.1, main     |
+|0.13|0.2, main     |
+|0.12|0.1           |
 
 ## License
 
