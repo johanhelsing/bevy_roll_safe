@@ -17,4 +17,4 @@ math_determinism = ["bevy_math/libm"]
 [dependencies]
 bevy = { version = "0.13", default-features = false }
 bevy_math = "0.13"
-bevy_ggrs = { git = "https://github.com/bushrat011899/bevy_ggrs", branch = "Bevy0.13Update", optional = true, default-features = false }
+bevy_ggrs = { version = "0.15", optional = true, default-features = false }
