@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .rollback_component_with_copy::<Health>()
         .checksum_component_with_hash::<Health>()
         // Add the state transition to the ggrs schedule and register it for rollback
-        .add_ggrs_state::<GameplayState>()
+        .init_ggrs_state::<GameplayState>()
         .add_plugins((
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
                 1.0 / 10.0,

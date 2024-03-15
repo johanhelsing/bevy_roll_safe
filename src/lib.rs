@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bevy::{
     ecs::schedule::{run_enter_schedule, ScheduleLabel},
     prelude::*,
@@ -13,32 +15,39 @@ pub mod prelude {
 }
 
 pub trait RollApp {
-    /// Add state transitions to the given schedule
-    fn add_roll_state<S: States>(&mut self, schedule: impl ScheduleLabel) -> &mut Self;
+    /// Init state transitions in the given schedule
+    fn init_roll_state<S: States + FromWorld>(&mut self, schedule: impl ScheduleLabel)
+        -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
-    fn add_ggrs_state<S: States + Clone>(&mut self) -> &mut Self;
+    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs in the specified schedule
-    fn add_ggrs_state_to_schedule<S: States + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self;
 }
 
 impl RollApp for App {
-    fn add_roll_state<S: States>(&mut self, schedule: impl ScheduleLabel) -> &mut Self {
-        self.init_resource::<NextState<S>>()
-            .init_resource::<State<S>>()
+    fn init_roll_state<S: States + FromWorld>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> &mut Self {
+        self.init_resource::<State<S>>()
+            .init_resource::<NextState<S>>()
             .init_resource::<InitialStateEntered<S>>()
+            // events are not rollback safe, but `apply_state_transition` will cause errors without it
+            .add_event::<StateTransitionEvent<S>>()
             .add_systems(
                 schedule,
                 (
-                    run_enter_schedule::<S>.run_if(resource_equals(InitialStateEntered::<S>(None))),
+                    run_enter_schedule::<S>
+                        .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
                     mark_state_initialized::<S>
-                        .run_if(resource_equals(InitialStateEntered::<S>(None))),
+                        .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
                     apply_state_transition::<S>,
                 )
                     .chain(),
@@ -46,20 +55,20 @@ impl RollApp for App {
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn add_ggrs_state<S: States + Clone>(&mut self) -> &mut Self {
+    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self {
         use bevy_ggrs::GgrsSchedule;
-        self.add_ggrs_state_to_schedule::<S>(GgrsSchedule)
+        self.init_ggrs_state_in_schedule::<S>(GgrsSchedule)
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn add_ggrs_state_to_schedule<S: States + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
         use crate::ggrs_support::{NextStateStrategy, StateStrategy};
         use bevy_ggrs::{CloneStrategy, ResourceSnapshotPlugin};
 
-        self.add_roll_state::<S>(schedule).add_plugins((
+        self.init_roll_state::<S>(schedule).add_plugins((
             ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
             ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
@@ -106,10 +115,18 @@ mod ggrs_support {
     }
 }
 
-#[derive(Resource, Debug, Reflect, Default, Eq, PartialEq, Clone)]
+#[derive(Resource, Debug, Reflect, Eq, PartialEq, Clone)]
 #[reflect(Resource)]
-pub struct InitialStateEntered<S: States>(Option<S>); // todo: PhantomData instead?
+pub struct InitialStateEntered<S: States>(bool, PhantomData<S>);
 
-fn mark_state_initialized<S: States>(mut state_initialized: ResMut<InitialStateEntered<S>>) {
-    state_initialized.0 = Some(default());
+impl<S: States> Default for InitialStateEntered<S> {
+    fn default() -> Self {
+        Self(false, default())
+    }
+}
+
+fn mark_state_initialized<S: States + FromWorld>(
+    mut state_initialized: ResMut<InitialStateEntered<S>>,
+) {
+    state_initialized.0 = true;
 }
