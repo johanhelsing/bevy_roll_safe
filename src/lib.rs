@@ -1,9 +1,6 @@
 use std::marker::PhantomData;
 
-use bevy::{
-    ecs::schedule::{run_enter_schedule, ScheduleLabel},
-    prelude::*,
-};
+use bevy::{ecs::schedule::ScheduleLabel, prelude::*, state::state::FreelyMutableState};
 
 mod frame_count;
 
@@ -16,23 +13,25 @@ pub mod prelude {
 
 pub trait RollApp {
     /// Init state transitions in the given schedule
-    fn init_roll_state<S: States + FromWorld>(&mut self, schedule: impl ScheduleLabel)
-        -> &mut Self;
+    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
-    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self;
+    fn init_ggrs_state<S: States + FromWorld + Clone + FreelyMutableState>(&mut self) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs in the specified schedule
-    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self;
 }
 
 impl RollApp for App {
-    fn init_roll_state<S: States + FromWorld>(
+    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
@@ -41,27 +40,17 @@ impl RollApp for App {
             .init_resource::<InitialStateEntered<S>>()
             // events are not rollback safe, but `apply_state_transition` will cause errors without it
             .add_event::<StateTransitionEvent<S>>()
-            .add_systems(
-                schedule,
-                (
-                    run_enter_schedule::<S>
-                        .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
-                    mark_state_initialized::<S>
-                        .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
-                    apply_state_transition::<S>,
-                )
-                    .chain(),
-            )
+            .add_systems(schedule, (run_state_transitions,).chain())
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self {
+    fn init_ggrs_state<S: States + FromWorld + Clone + FreelyMutableState>(&mut self) -> &mut Self {
         use bevy_ggrs::GgrsSchedule;
         self.init_ggrs_state_in_schedule::<S>(GgrsSchedule)
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
@@ -76,9 +65,13 @@ impl RollApp for App {
     }
 }
 
+pub fn run_state_transitions(world: &mut World) {
+    let _ = world.try_run_schedule(StateTransition);
+}
+
 #[cfg(feature = "bevy_ggrs")]
 mod ggrs_support {
-    use bevy::prelude::*;
+    use bevy::{prelude::*, state::state::FreelyMutableState};
     use bevy_ggrs::Strategy;
     use std::marker::PhantomData;
 
@@ -101,16 +94,22 @@ mod ggrs_support {
     pub(crate) struct NextStateStrategy<S: States>(PhantomData<S>);
 
     // todo: make NextState<S> implement clone instead
-    impl<S: States> Strategy for NextStateStrategy<S> {
+    impl<S: States + FreelyMutableState> Strategy for NextStateStrategy<S> {
         type Target = NextState<S>;
         type Stored = Option<S>;
 
         fn store(target: &Self::Target) -> Self::Stored {
-            target.0.to_owned()
+            match target {
+                NextState::Unchanged => None,
+                NextState::Pending(s) => Some(s.to_owned()),
+            }
         }
 
         fn load(stored: &Self::Stored) -> Self::Target {
-            NextState(stored.to_owned())
+            match stored {
+                None => NextState::Unchanged,
+                Some(s) => NextState::Pending(s.to_owned()),
+            }
         }
     }
 }

@@ -6,7 +6,7 @@ use bevy_ggrs::{
     prelude::*,
     LocalInputs, LocalPlayers,
 };
-use bevy_roll_safe::prelude::*;
+use bevy_roll_safe::{prelude::*, run_state_transitions};
 
 type GgrsConfig = bevy_ggrs::GgrsConfig<u8, String>;
 
@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(
             GgrsSchedule,
             decrease_health
-                .after(apply_state_transition::<GameplayState>)
+                .after(run_state_transitions)
                 .run_if(in_state(GameplayState::InRound)),
         )
         .insert_resource(Session::SyncTest(session))
