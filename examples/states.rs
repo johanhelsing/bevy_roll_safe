@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(
             GgrsSchedule,
             decrease_health
-                .after(apply_state_transition::<GameplayState>)
+                .after(bevy_roll_safe::apply_state_transition::<GameplayState>)
                 .run_if(in_state(GameplayState::InRound)),
         )
         .insert_resource(Session::SyncTest(session))

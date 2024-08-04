@@ -1,9 +1,6 @@
 use std::marker::PhantomData;
 
-use bevy::{
-    ecs::schedule::{run_enter_schedule, ScheduleLabel},
-    prelude::*,
-};
+use bevy::{ecs::schedule::ScheduleLabel, prelude::*, state::state::FreelyMutableState};
 
 mod frame_count;
 
@@ -16,52 +13,61 @@ pub mod prelude {
 
 pub trait RollApp {
     /// Init state transitions in the given schedule
-    fn init_roll_state<S: States + FromWorld>(&mut self, schedule: impl ScheduleLabel)
-        -> &mut Self;
+    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
-    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self;
+    fn init_ggrs_state<S: States + FromWorld + Clone + FreelyMutableState>(&mut self) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs in the specified schedule
-    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self;
 }
 
 impl RollApp for App {
-    fn init_roll_state<S: States + FromWorld>(
+    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
-        self.init_resource::<State<S>>()
-            .init_resource::<NextState<S>>()
-            .init_resource::<InitialStateEntered<S>>()
-            // events are not rollback safe, but `apply_state_transition` will cause errors without it
-            .add_event::<StateTransitionEvent<S>>()
-            .add_systems(
-                schedule,
-                (
-                    run_enter_schedule::<S>
-                        .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
-                    mark_state_initialized::<S>
-                        .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
-                    apply_state_transition::<S>,
-                )
-                    .chain(),
-            )
+        if !self.world().contains_resource::<State<S>>() {
+            self.init_resource::<State<S>>()
+                .init_resource::<NextState<S>>()
+                .init_resource::<InitialStateEntered<S>>()
+                // events are not rollback safe, but `apply_state_transition` will cause errors without it
+                .add_event::<StateTransitionEvent<S>>()
+                .add_systems(
+                    schedule,
+                    (
+                        run_enter_schedule::<S>
+                            .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
+                        mark_state_initialized::<S>
+                            .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
+                        apply_state_transition::<S>,
+                    )
+                        .chain(),
+                );
+        } else {
+            let name = std::any::type_name::<S>();
+            warn!("State {} is already initialized.", name);
+        }
+
+        self
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn init_ggrs_state<S: States + FromWorld + Clone>(&mut self) -> &mut Self {
+    fn init_ggrs_state<S: States + FromWorld + Clone + FreelyMutableState>(&mut self) -> &mut Self {
         use bevy_ggrs::GgrsSchedule;
         self.init_ggrs_state_in_schedule::<S>(GgrsSchedule)
     }
 
     #[cfg(feature = "bevy_ggrs")]
-    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone>(
+    fn init_ggrs_state_in_schedule<S: States + FromWorld + Clone + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
@@ -78,7 +84,7 @@ impl RollApp for App {
 
 #[cfg(feature = "bevy_ggrs")]
 mod ggrs_support {
-    use bevy::prelude::*;
+    use bevy::{prelude::*, state::state::FreelyMutableState};
     use bevy_ggrs::Strategy;
     use std::marker::PhantomData;
 
@@ -101,16 +107,22 @@ mod ggrs_support {
     pub(crate) struct NextStateStrategy<S: States>(PhantomData<S>);
 
     // todo: make NextState<S> implement clone instead
-    impl<S: States> Strategy for NextStateStrategy<S> {
+    impl<S: States + FreelyMutableState> Strategy for NextStateStrategy<S> {
         type Target = NextState<S>;
         type Stored = Option<S>;
 
         fn store(target: &Self::Target) -> Self::Stored {
-            target.0.to_owned()
+            match target {
+                NextState::Unchanged => None,
+                NextState::Pending(s) => Some(s.to_owned()),
+            }
         }
 
         fn load(stored: &Self::Stored) -> Self::Target {
-            NextState(stored.to_owned())
+            match stored {
+                None => NextState::Unchanged,
+                Some(s) => NextState::Pending(s.to_owned()),
+            }
         }
     }
 }
@@ -129,4 +141,55 @@ fn mark_state_initialized<S: States + FromWorld>(
     mut state_initialized: ResMut<InitialStateEntered<S>>,
 ) {
     state_initialized.0 = true;
+}
+
+/// Run the enter schedule (if it exists) for the current state.
+pub fn run_enter_schedule<S: States>(world: &mut World) {
+    let Some(state) = world.get_resource::<State<S>>() else {
+        return;
+    };
+    world.try_run_schedule(OnEnter(state.get().clone())).ok();
+}
+
+/// If a new state is queued in [`NextState<S>`], this system:
+/// - Takes the new state value from [`NextState<S>`] and updates [`State<S>`].
+/// - Sends a relevant [`StateTransitionEvent`]
+/// - Runs the [`OnExit(exited_state)`] schedule, if it exists.
+/// - Runs the [`OnTransition { from: exited_state, to: entered_state }`](OnTransition), if it exists.
+/// - Runs the [`OnEnter(entered_state)`] schedule, if it exists.
+pub fn apply_state_transition<S: States + FreelyMutableState>(world: &mut World) {
+    // We want to take the `NextState` resource,
+    // but only mark it as changed if it wasn't empty.
+    let Some(mut next_state_resource) = world.get_resource_mut::<NextState<S>>() else {
+        return;
+    };
+    if let NextState::Pending(entered) = next_state_resource.bypass_change_detection() {
+        let entered = entered.clone();
+        *next_state_resource = NextState::Unchanged;
+        match world.get_resource_mut::<State<S>>() {
+            Some(mut state_resource) => {
+                if *state_resource != entered {
+                    let exited = state_resource.get().clone();
+                    *state_resource = State::new(entered.clone());
+                    world.send_event(StateTransitionEvent {
+                        exited: Some(exited.clone()),
+                        entered: Some(entered.clone()),
+                    });
+                    // Try to run the schedules if they exist.
+                    world.try_run_schedule(OnExit(exited.clone())).ok();
+                    world
+                        .try_run_schedule(OnTransition {
+                            exited,
+                            entered: entered.clone(),
+                        })
+                        .ok();
+                    world.try_run_schedule(OnEnter(entered)).ok();
+                }
+            }
+            None => {
+                world.insert_resource(State::new(entered.clone()));
+                world.try_run_schedule(OnEnter(entered)).ok();
+            }
+        };
+    }
 }
