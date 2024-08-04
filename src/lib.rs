@@ -35,12 +35,29 @@ impl RollApp for App {
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
-        self.init_resource::<State<S>>()
-            .init_resource::<NextState<S>>()
-            .init_resource::<InitialStateEntered<S>>()
-            // events are not rollback safe, but `apply_state_transition` will cause errors without it
-            .add_event::<StateTransitionEvent<S>>()
-            .add_systems(schedule, (run_state_transitions,).chain())
+        if !self.world().contains_resource::<State<S>>() {
+            self.init_resource::<State<S>>()
+                .init_resource::<NextState<S>>()
+                .init_resource::<InitialStateEntered<S>>()
+                // events are not rollback safe, but `apply_state_transition` will cause errors without it
+                .add_event::<StateTransitionEvent<S>>()
+                .add_systems(
+                    schedule,
+                    (
+                        run_enter_schedule::<S>
+                            .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
+                        mark_state_initialized::<S>
+                            .run_if(resource_equals(InitialStateEntered::<S>(false, default()))),
+                        apply_state_transition::<S>,
+                    )
+                        .chain(),
+                );
+        } else {
+            let name = std::any::type_name::<S>();
+            warn!("State {} is already initialized.", name);
+        }
+
+        self
     }
 
     #[cfg(feature = "bevy_ggrs")]
@@ -63,10 +80,6 @@ impl RollApp for App {
             ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
         ))
     }
-}
-
-pub fn run_state_transitions(world: &mut World) {
-    let _ = world.try_run_schedule(StateTransition);
 }
 
 #[cfg(feature = "bevy_ggrs")]
@@ -128,4 +141,55 @@ fn mark_state_initialized<S: States + FromWorld>(
     mut state_initialized: ResMut<InitialStateEntered<S>>,
 ) {
     state_initialized.0 = true;
+}
+
+/// Run the enter schedule (if it exists) for the current state.
+pub fn run_enter_schedule<S: States>(world: &mut World) {
+    let Some(state) = world.get_resource::<State<S>>() else {
+        return;
+    };
+    world.try_run_schedule(OnEnter(state.get().clone())).ok();
+}
+
+/// If a new state is queued in [`NextState<S>`], this system:
+/// - Takes the new state value from [`NextState<S>`] and updates [`State<S>`].
+/// - Sends a relevant [`StateTransitionEvent`]
+/// - Runs the [`OnExit(exited_state)`] schedule, if it exists.
+/// - Runs the [`OnTransition { from: exited_state, to: entered_state }`](OnTransition), if it exists.
+/// - Runs the [`OnEnter(entered_state)`] schedule, if it exists.
+pub fn apply_state_transition<S: States + FreelyMutableState>(world: &mut World) {
+    // We want to take the `NextState` resource,
+    // but only mark it as changed if it wasn't empty.
+    let Some(mut next_state_resource) = world.get_resource_mut::<NextState<S>>() else {
+        return;
+    };
+    if let NextState::Pending(entered) = next_state_resource.bypass_change_detection() {
+        let entered = entered.clone();
+        *next_state_resource = NextState::Unchanged;
+        match world.get_resource_mut::<State<S>>() {
+            Some(mut state_resource) => {
+                if *state_resource != entered {
+                    let exited = state_resource.get().clone();
+                    *state_resource = State::new(entered.clone());
+                    world.send_event(StateTransitionEvent {
+                        exited: Some(exited.clone()),
+                        entered: Some(entered.clone()),
+                    });
+                    // Try to run the schedules if they exist.
+                    world.try_run_schedule(OnExit(exited.clone())).ok();
+                    world
+                        .try_run_schedule(OnTransition {
+                            exited,
+                            entered: entered.clone(),
+                        })
+                        .ok();
+                    world.try_run_schedule(OnEnter(entered)).ok();
+                }
+            }
+            None => {
+                world.insert_resource(State::new(entered.clone()));
+                world.try_run_schedule(OnEnter(entered)).ok();
+            }
+        };
+    }
 }

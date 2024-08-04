@@ -13,6 +13,11 @@ Some of Bevy's features can't be used in a rollback context (with crates such as
 ## Roadmap
 
 - [x] States
+  - [x] Basic freely mutable states
+  - [x] `OnEnter`/`OnLeave`/`OnTransition`
+  - [ ] Sub-States
+  - [ ] Computed states
+  - [ ] Roll-safe events
 - [x] FrameCount
 - [ ] Events
 
