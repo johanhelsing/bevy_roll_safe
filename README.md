@@ -41,7 +41,8 @@ See the [`states`](https://github.com/johanhelsing/bevy_roll_safe/blob/main/exam
 
 |bevy|bevy_roll_safe|
 |----|--------------|
-|0.14|0.3, main     |
+|0.15|0.4, main     |
+|0.14|0.3           |
 |0.13|0.2           |
 |0.12|0.1           |
 
