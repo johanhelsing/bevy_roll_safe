@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, utils::HashMap};
+use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, platform::collections::HashMap, prelude::*};
 use bevy_ggrs::{
     ggrs::{PlayerType, SessionBuilder},
     prelude::*,
@@ -76,15 +76,15 @@ fn decrease_health(
     mut state: ResMut<NextState<GameplayState>>,
 ) {
     // this system should never run in the GameOver state,
-    // so single_mut is safe to use
-    let (player_entity, mut health) = players.single_mut();
+    // so the player should always exist
+    let (player_entity, mut health) = players.single_mut().expect("player entity");
 
     health.0 = health.0.saturating_sub(1);
     info!("{health:?}");
 
     if health.0 == 0 {
         info!("despawning player, setting GameOver state");
-        commands.entity(player_entity).despawn_recursive();
+        commands.entity(player_entity).despawn();
         state.set(GameplayState::GameOver);
     }
 }

@@ -15,6 +15,6 @@ bevy_ggrs = ["dep:bevy_ggrs"]
 math_determinism = ["bevy_math/libm"]
 
 [dependencies]
-bevy = { version = "0.15", default-features = false, features = ["bevy_state"] }
-bevy_math = "0.15"
-bevy_ggrs = { version = "0.17", optional = true, default-features = false }
+bevy = { version = "0.16", default-features = false, features = ["bevy_state"] }
+bevy_math = "0.16"
+bevy_ggrs = { version = "0.18", optional = true, default-features = false }
