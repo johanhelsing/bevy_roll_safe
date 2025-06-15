@@ -2,10 +2,16 @@ use std::marker::PhantomData;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, state::state::FreelyMutableState};
 
+#[cfg(feature = "audio")]
+mod audio;
 mod frame_count;
 mod schedule;
 
 // re-exports
+#[cfg(feature = "audio")]
+pub use audio::{
+    remove_finished_sounds, RollbackAudioPlayer, RollbackAudioPlayerInstance, RollbackAudioPlugin,
+};
 pub use frame_count::{increase_frame_count, RollFrameCount};
 pub use schedule::{
     RollbackPostUpdate, RollbackPreUpdate, RollbackSchedulePlugin, RollbackStateTransition,
