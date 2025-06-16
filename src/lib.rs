@@ -3,20 +3,31 @@ use std::marker::PhantomData;
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, state::state::FreelyMutableState};
 
 mod frame_count;
+mod schedule;
 
 // re-exports
 pub use frame_count::{increase_frame_count, RollFrameCount};
+pub use schedule::{
+    RollbackPostUpdate, RollbackPreUpdate, RollbackSchedulePlugin, RollbackStateTransition,
+    RollbackUpdate,
+};
 
 pub mod prelude {
-    pub use super::RollApp;
+    pub use super::{
+        RollApp, RollbackPostUpdate, RollbackPreUpdate, RollbackSchedulePlugin,
+        RollbackStateTransition, RollbackUpdate,
+    };
 }
 
 pub trait RollApp {
     /// Init state transitions in the given schedule
-    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(
+    fn init_roll_state_in_schedule<S: States + FromWorld + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self;
+
+    /// Init state transitions in the given schedule
+    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(&mut self) -> &mut Self;
 
     #[cfg(feature = "bevy_ggrs")]
     /// Register this state to be rolled back by bevy_ggrs
@@ -31,7 +42,7 @@ pub trait RollApp {
 }
 
 impl RollApp for App {
-    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(
+    fn init_roll_state_in_schedule<S: States + FromWorld + FreelyMutableState>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> &mut Self {
@@ -60,10 +71,23 @@ impl RollApp for App {
         self
     }
 
+    fn init_roll_state<S: States + FromWorld + FreelyMutableState>(&mut self) -> &mut Self {
+        self.init_roll_state_in_schedule::<S>(RollbackStateTransition)
+    }
+
     #[cfg(feature = "bevy_ggrs")]
     fn init_ggrs_state<S: States + FromWorld + Clone + FreelyMutableState>(&mut self) -> &mut Self {
-        use bevy_ggrs::GgrsSchedule;
-        self.init_ggrs_state_in_schedule::<S>(GgrsSchedule)
+        // verify the schedule exists first?
+        self.get_schedule(RollbackStateTransition)
+            .unwrap_or_else(|| {
+                panic!(
+                    "RollbackStateTransition schedule does not exist. \
+                     Please add it by adding the `RollbackSchedulePlugin` \
+                     or call `init_ggrs_state_in_schedule` with the desired schedule."
+                )
+            });
+
+        self.init_ggrs_state_in_schedule::<S>(RollbackStateTransition)
     }
 
     #[cfg(feature = "bevy_ggrs")]
@@ -74,11 +98,12 @@ impl RollApp for App {
         use crate::ggrs_support::{NextStateStrategy, StateStrategy};
         use bevy_ggrs::{CloneStrategy, ResourceSnapshotPlugin};
 
-        self.init_roll_state::<S>(schedule).add_plugins((
-            ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
-            ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
-            ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
-        ))
+        self.init_roll_state_in_schedule::<S>(schedule)
+            .add_plugins((
+                ResourceSnapshotPlugin::<StateStrategy<S>>::default(),
+                ResourceSnapshotPlugin::<NextStateStrategy<S>>::default(),
+                ResourceSnapshotPlugin::<CloneStrategy<InitialStateEntered<S>>>::default(),
+            ))
     }
 }
 
