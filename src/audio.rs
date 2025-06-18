@@ -1,4 +1,8 @@
-use bevy::{platform::collections::HashSet, prelude::*};
+use bevy::{
+    audio::PlaybackMode,
+    platform::collections::{HashMap, HashSet},
+    prelude::*,
+};
 #[cfg(feature = "bevy_ggrs")]
 use bevy_ggrs::RollbackApp;
 use std::time::Duration;
@@ -30,8 +34,6 @@ pub struct RollbackAudioPlayer {
     /// The actual sound effect to play
     pub audio_player: AudioPlayer,
 }
-// /// Differentiates several unique instances of the same sound playing at once.
-// pub key: usize,
 
 impl From<AudioPlayer> for RollbackAudioPlayer {
     fn from(audio_player: AudioPlayer) -> Self {
@@ -50,56 +52,53 @@ pub struct RollbackAudioPlayerInstance {
     desired_start_time: Duration,
 }
 
+#[derive(PartialEq, Eq, Hash)]
 struct PlayingRollbackAudioKey {
-    player: AudioPlayer,
+    audio_source: Handle<AudioSource>,
     start_time: Duration,
+    // TODO: add more keys as appropriate if sound effects are colliding
 }
-
-impl PartialEq for PlayingRollbackAudioKey {
-    fn eq(&self, other: &Self) -> bool {
-        // TODO: make a PR for bevy to derive PartialEq for AudioPlayer
-        // and remove this manual implementation
-        self.player.0 == other.player.0 && self.start_time == other.start_time
-    }
-}
-
-impl std::hash::Hash for PlayingRollbackAudioKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // TODO: make a PR for bevy to derive Hash for AudioPlayer
-        // and remove this manual implementation
-        self.player.0.hash(state);
-        self.start_time.hash(state);
-    }
-}
-
-impl std::cmp::Eq for PlayingRollbackAudioKey {}
 
 /// Updates playing sounds to match the desired state
 /// spawns any missing sounds that should be playing.
 /// and despawns any sounds that should not be playing.
 pub fn sync_rollback_sounds(
     mut commands: Commands,
-    rollback_audio_players: Query<(&RollbackAudioPlayer, &RollbackAudioPlayerStartTime)>,
+    rollback_audio_players: Query<(
+        &RollbackAudioPlayer,
+        &RollbackAudioPlayerStartTime,
+        Option<&PlaybackSettings>,
+    )>,
     instances: Query<(Entity, &RollbackAudioPlayerInstance, &AudioPlayer)>,
 ) {
-    let desired_state: HashSet<PlayingRollbackAudioKey> = rollback_audio_players
-        .iter()
-        .map(|(player, start_time)| PlayingRollbackAudioKey {
-            player: player.audio_player.clone(),
-            start_time: start_time.0,
-        })
-        .collect();
+    // todo: Ideally we would use a HashSet with settings, but PlaybackSettings
+    // is not hashable. So we use a HashMap with the key being the audio source
+    // and start time. This likely leads to some collisions, but leaving as is
+    // for now.
+    let desired_state: HashMap<PlayingRollbackAudioKey, Option<&PlaybackSettings>> =
+        rollback_audio_players
+            .iter()
+            .map(|(player, start_time, playback_settings)| {
+                (
+                    PlayingRollbackAudioKey {
+                        audio_source: player.audio_player.0.clone(),
+                        start_time: start_time.0,
+                    },
+                    playback_settings,
+                )
+            })
+            .collect();
 
     let mut playing_sounds = HashSet::new();
 
     for (instance_entity, instance, audio_player) in &instances {
         let rollback_sound_key = PlayingRollbackAudioKey {
-            player: audio_player.clone(),
+            audio_source: audio_player.0.clone(),
             start_time: instance.desired_start_time,
         };
 
         // if the playing sound is not in the desired state, despawn it
-        if !desired_state.contains(&rollback_sound_key) {
+        if !desired_state.contains_key(&rollback_sound_key) {
             commands.entity(instance_entity).despawn();
         } else {
             playing_sounds.insert(rollback_sound_key);
@@ -107,15 +106,26 @@ pub fn sync_rollback_sounds(
     }
 
     // spawn any missing sounds
-    for sound in desired_state.difference(&playing_sounds) {
-        info!("Spawning sound: {:?}", sound.player.0);
+    for (sound, settings) in desired_state {
+        if playing_sounds.contains(&sound) {
+            // if the sound is already playing, skip it
+            continue;
+        }
+
+        debug!("Spawning sound: {:?}", sound.audio_source);
+
+        let settings = settings.unwrap_or(&PlaybackSettings::ONCE);
+
+        assert!(
+            matches!(settings.mode, PlaybackMode::Once),
+            "Only PlaybackMode::Once is supported for RollbackAudioPlayer"
+        );
+
         commands.spawn((
-            sound.player.clone(),
+            AudioPlayer::new(sound.audio_source.clone()),
             RollbackAudioPlayerInstance {
                 desired_start_time: sound.start_time,
             },
-            // TODO: handle other settings as well
-            PlaybackSettings::ONCE,
         ));
     }
 }
@@ -156,12 +166,17 @@ fn add_rollback_to_rollback_sounds(
 }
 
 pub fn remove_finished_sounds(
-    rollback_audio_players: Query<(Entity, &RollbackAudioPlayer, &RollbackAudioPlayerStartTime)>,
+    rollback_audio_players: Query<(
+        Entity,
+        &RollbackAudioPlayer,
+        &RollbackAudioPlayerStartTime,
+        Option<&PlaybackSettings>,
+    )>,
     mut commands: Commands,
     audio_sources: Res<Assets<AudioSource>>,
     time: Res<Time>,
 ) {
-    for (entity, player, start_time) in rollback_audio_players.iter() {
+    for (entity, player, start_time, settings) in rollback_audio_players.iter() {
         if let Some(audio_source) = audio_sources.get(&player.audio_player.0) {
             use bevy::audio::Source;
 
@@ -181,7 +196,10 @@ pub fn remove_finished_sounds(
 
             let time_played = time.elapsed() - start_time.0;
 
-            if time_played >= duration {
+            let speed = settings.map_or(1.0, |s| s.speed);
+            let scaled_duration = duration.div_f32(speed);
+
+            if time_played >= scaled_duration {
                 debug!("despawning finished sound: {:?}", player.audio_player.0);
                 commands.entity(entity).despawn();
             }
