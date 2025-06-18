@@ -1,6 +1,7 @@
 use bevy::{platform::collections::HashSet, prelude::*};
 #[cfg(feature = "bevy_ggrs")]
 use bevy_ggrs::RollbackApp;
+use std::time::Duration;
 
 use crate::RollbackPreUpdate;
 
@@ -15,7 +16,6 @@ impl Plugin for RollbackAudioPlugin {
         #[cfg(feature = "bevy_ggrs")]
         {
             app.rollback_component_with_clone::<RollbackAudioPlayer>();
-            // app.add_systems(bevy_ggrs::GgrsSchedule, remove_finished_sounds);
         }
     }
 }
@@ -26,17 +26,17 @@ pub struct RollbackAudioPlayer {
     /// The actual sound effect to play
     pub audio_player: AudioPlayer,
     /// When the sound effect should have started playing
-    pub start_frame: i32,
+    pub start_time: Duration,
     /// Differentiates several unique instances of the same sound playing at once.
     pub key: usize,
 }
 
 impl RollbackAudioPlayer {
     /// Creates a new RollbackAudioPlayer with the given audio player, start frame, and key.
-    pub fn new(audio_player: AudioPlayer, start_frame: i32, key: usize) -> Self {
+    pub fn new(audio_player: AudioPlayer, start_time: Duration, key: usize) -> Self {
         Self {
             audio_player,
-            start_frame,
+            start_time,
             key,
         }
     }
@@ -46,7 +46,8 @@ impl RollbackAudioPlayer {
 #[derive(Component)]
 pub struct RollbackAudioPlayerInstance {
     key: usize,
-    desired_start_frame: i32,
+    /// The desired start time in the rollback world's time
+    desired_start_time: Duration,
 }
 
 impl PartialEq for RollbackAudioPlayer {
@@ -54,7 +55,7 @@ impl PartialEq for RollbackAudioPlayer {
         // TODO: make a PR for bevy to derive PartialEq for AudioPlayer
         // and remove this manual implementation
         self.audio_player.0 == other.audio_player.0
-            && self.start_frame == other.start_frame
+            && self.start_time == other.start_time
             && self.key == other.key
     }
 }
@@ -64,7 +65,7 @@ impl std::hash::Hash for RollbackAudioPlayer {
         // TODO: make a PR for bevy to derive Hash for AudioPlayer
         // and remove this manual implementation
         self.audio_player.0.hash(state);
-        self.start_frame.hash(state);
+        self.start_time.hash(state);
         self.key.hash(state);
     }
 }
@@ -79,9 +80,6 @@ pub fn sync_rollback_sounds(
     rollback_audio_players: Query<&RollbackAudioPlayer>,
     instances: Query<(Entity, &RollbackAudioPlayerInstance, &AudioPlayer)>,
 ) {
-    // TODO: sound effects that have actually finished playing should be
-    // despawned from the rollback world as well. How to do that?
-
     let desired_state: HashSet<RollbackAudioPlayer> =
         rollback_audio_players.iter().cloned().collect();
 
@@ -91,7 +89,7 @@ pub fn sync_rollback_sounds(
         // reconstruct the RollbackSoundEffect from the playing sound
         let rollback_sound = RollbackAudioPlayer {
             audio_player: audio_player.clone(),
-            start_frame: instance.desired_start_frame,
+            start_time: instance.desired_start_time,
             key: instance.key,
         };
 
@@ -110,7 +108,7 @@ pub fn sync_rollback_sounds(
             sound.audio_player.clone(),
             RollbackAudioPlayerInstance {
                 key: sound.key,
-                desired_start_frame: sound.start_frame,
+                desired_start_time: sound.start_time,
             },
             // TODO: handle other settings as well
             PlaybackSettings::ONCE,
@@ -119,20 +117,17 @@ pub fn sync_rollback_sounds(
 }
 
 pub fn remove_finished_sounds(
-    frame: Res<bevy_ggrs::RollbackFrameCount>,
     rollback_audio_players: Query<(Entity, &RollbackAudioPlayer)>,
     mut commands: Commands,
     audio_sources: Res<Assets<AudioSource>>,
-    frame_rate: Res<bevy_ggrs::RollbackFrameRate>,
+    time: Res<Time>,
 ) {
     for (entity, player) in rollback_audio_players.iter() {
         if let Some(audio_source) = audio_sources.get(&player.audio_player.0) {
             use bevy::audio::Source;
 
-            let frames_played = frame.0 - player.start_frame;
-
-            // perf: cache frames_to_play instead of calculating every frame?
-            let seconds_to_play = audio_source
+            // perf: cache duration instead of calculating every frame?
+            let duration = audio_source
                 .decoder()
                 .total_duration()
                 .unwrap_or_else(|| {
@@ -143,13 +138,12 @@ pub fn remove_finished_sounds(
                         FALLBACK_DURATION_SECS
                     );
                     std::time::Duration::from_secs(FALLBACK_DURATION_SECS)
-                })
-                .as_secs_f64();
+                });
 
-            let frames_to_play = (seconds_to_play * (**frame_rate) as f64) as i32;
+            let time_played = time.elapsed() - player.start_time;
 
-            if frames_played >= frames_to_play {
-                info!("despawning finished sound: {:?}", player.audio_player.0);
+            if time_played >= duration {
+                debug!("despawning finished sound: {:?}", player.audio_player.0);
                 commands.entity(entity).despawn();
             }
         }
