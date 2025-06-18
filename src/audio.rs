@@ -74,7 +74,7 @@ impl std::cmp::Eq for RollbackAudioPlayer {}
 /// Updates playing sounds to match the desired state
 /// spawns any missing sounds that should be playing.
 /// and despawns any sounds that should not be playing.
-fn sync_rollback_sounds(
+pub fn sync_rollback_sounds(
     mut commands: Commands,
     rollback_audio_players: Query<&RollbackAudioPlayer>,
     instances: Query<(Entity, &RollbackAudioPlayerInstance, &AudioPlayer)>,
