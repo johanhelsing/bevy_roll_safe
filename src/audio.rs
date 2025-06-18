@@ -114,15 +114,11 @@ pub fn sync_rollback_sounds(
 
         debug!("Spawning sound: {:?}", sound.audio_source);
 
-        let settings = settings.unwrap_or(&PlaybackSettings::ONCE);
-
-        assert!(
-            matches!(settings.mode, PlaybackMode::Once),
-            "Only PlaybackMode::Once is supported for RollbackAudioPlayer"
-        );
+        let settings = settings.cloned().unwrap_or(PlaybackSettings::ONCE);
 
         commands.spawn((
             AudioPlayer::new(sound.audio_source.clone()),
+            settings,
             RollbackAudioPlayerInstance {
                 desired_start_time: sound.start_time,
             },
@@ -142,10 +138,12 @@ pub fn start_rollback_sounds(
     >,
     time: Res<Time>,
 ) {
+    let start_time = time.elapsed();
     for entity in rollback_audio_players.iter_mut() {
+        trace!("adding RollbackAudioPlayerStartTime: {entity:?} {start_time:?}");
         commands
             .entity(entity)
-            .insert(RollbackAudioPlayerStartTime(time.elapsed()));
+            .insert(RollbackAudioPlayerStartTime(start_time));
     }
 }
 
@@ -160,7 +158,7 @@ fn add_rollback_to_rollback_sounds(
 ) {
     for entity in rollback_audio_players.iter_mut() {
         use bevy_ggrs::AddRollbackCommandExtension;
-
+        debug!("adding ggrs rollback to audio player: {entity:?}");
         commands.entity(entity).add_rollback();
     }
 }
@@ -200,8 +198,31 @@ pub fn remove_finished_sounds(
             let scaled_duration = duration.div_f32(speed);
 
             if time_played >= scaled_duration {
-                debug!("despawning finished sound: {:?}", player.audio_player.0);
-                commands.entity(entity).despawn();
+                debug!(
+                    "despawning finished sound: {:?} {:?}",
+                    entity, player.audio_player.0
+                );
+                let mode = settings.map_or(PlaybackMode::Once, |s| s.mode);
+
+                match mode {
+                    PlaybackMode::Despawn => commands.entity(entity).despawn(),
+                    PlaybackMode::Remove => {
+                        commands.entity(entity).remove::<(
+                            RollbackAudioPlayer,
+                            RollbackAudioPlayerStartTime,
+                            PlaybackSettings,
+                        )>();
+                    }
+                    // if we just leave it alone, it will continue existing in both rollback and regular version
+                    PlaybackMode::Once => {}
+                    PlaybackMode::Loop => {
+                        // if the sound is looping, we don't despawn it, but we can reset the start time
+                        // which will change the desired state and trigger a new sound to be played
+                        commands
+                            .entity(entity)
+                            .insert(RollbackAudioPlayerStartTime(time.elapsed()));
+                    }
+                }
             }
         }
     }
