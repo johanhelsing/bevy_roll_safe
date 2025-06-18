@@ -2,12 +2,15 @@ use bevy::{platform::collections::HashSet, prelude::*};
 #[cfg(feature = "bevy_ggrs")]
 use bevy_ggrs::RollbackApp;
 
+use crate::RollbackPreUpdate;
+
 /// Plugin for managing rollback audio effects in a Bevy application.
 pub struct RollbackAudioPlugin;
 
 impl Plugin for RollbackAudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, sync_rollback_sounds);
+        app.add_systems(RollbackPreUpdate, remove_finished_sounds);
 
         #[cfg(feature = "bevy_ggrs")]
         {
@@ -115,7 +118,6 @@ fn sync_rollback_sounds(
     }
 }
 
-#[cfg(feature = "bevy_ggrs")]
 pub fn remove_finished_sounds(
     frame: Res<bevy_ggrs::RollbackFrameCount>,
     rollback_audio_players: Query<(Entity, &RollbackAudioPlayer)>,
