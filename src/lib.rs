@@ -57,8 +57,7 @@ impl RollApp for App {
             self.init_resource::<State<S>>()
                 .init_resource::<NextState<S>>()
                 .init_resource::<InitialStateEntered<S>>()
-                // events are not rollback safe, but `apply_state_transition` will cause errors without it
-                .add_event::<StateTransitionEvent<S>>()
+                // .add_event::<StateTransitionEvent<S>>()
                 .add_systems(
                     schedule,
                     (
@@ -203,10 +202,10 @@ pub fn apply_state_transition<S: States + FreelyMutableState>(world: &mut World)
                 if *state_resource != entered {
                     let exited = state_resource.get().clone();
                     *state_resource = State::new(entered.clone());
-                    world.send_event(StateTransitionEvent {
-                        exited: Some(exited.clone()),
-                        entered: Some(entered.clone()),
-                    });
+                    // world.send_event(StateTransitionEvent {
+                    //     exited: Some(exited.clone()),
+                    //     entered: Some(entered.clone()),
+                    // });
                     // Try to run the schedules if they exist.
                     world.try_run_schedule(OnExit(exited.clone())).ok();
                     world
