@@ -108,7 +108,7 @@ impl Default for RollbackScheduleOrder {
 fn run_schedules(world: &mut World) {
     world.resource_scope(|world, order: Mut<RollbackScheduleOrder>| {
         for label in &order.labels {
-            debug!("Running rollback schedule: {:?}", label);
+            trace!("Running rollback schedule: {:?}", label);
             let _ = world.try_run_schedule(*label);
         }
     });

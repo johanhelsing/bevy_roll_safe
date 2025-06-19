@@ -1,11 +1,20 @@
+#![doc = include_str!("../README.md")]
+
 use std::marker::PhantomData;
 
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*, state::state::FreelyMutableState};
 
+#[cfg(feature = "audio")]
+mod audio;
 mod frame_count;
 mod schedule;
 
 // re-exports
+#[cfg(feature = "audio")]
+pub use audio::{
+    remove_finished_sounds, start_rollback_sounds, sync_rollback_sounds, RollbackAudioPlayer,
+    RollbackAudioPlayerInstance, RollbackAudioPlugin,
+};
 pub use frame_count::{increase_frame_count, RollFrameCount};
 pub use schedule::{
     RollbackPostUpdate, RollbackPreUpdate, RollbackSchedulePlugin, RollbackStateTransition,
@@ -17,6 +26,8 @@ pub mod prelude {
         RollApp, RollbackPostUpdate, RollbackPreUpdate, RollbackSchedulePlugin,
         RollbackStateTransition, RollbackUpdate,
     };
+    #[cfg(feature = "audio")]
+    pub use super::{RollbackAudioPlayer, RollbackAudioPlugin};
 }
 
 pub trait RollApp {
@@ -50,8 +61,7 @@ impl RollApp for App {
             self.init_resource::<State<S>>()
                 .init_resource::<NextState<S>>()
                 .init_resource::<InitialStateEntered<S>>()
-                // events are not rollback safe, but `apply_state_transition` will cause errors without it
-                .add_event::<StateTransitionEvent<S>>()
+                // .add_event::<StateTransitionEvent<S>>()
                 .add_systems(
                     schedule,
                     (
@@ -196,10 +206,10 @@ pub fn apply_state_transition<S: States + FreelyMutableState>(world: &mut World)
                 if *state_resource != entered {
                     let exited = state_resource.get().clone();
                     *state_resource = State::new(entered.clone());
-                    world.send_event(StateTransitionEvent {
-                        exited: Some(exited.clone()),
-                        entered: Some(entered.clone()),
-                    });
+                    // world.send_event(StateTransitionEvent {
+                    //     exited: Some(exited.clone()),
+                    //     entered: Some(entered.clone()),
+                    // });
                     // Try to run the schedules if they exist.
                     world.try_run_schedule(OnExit(exited.clone())).ok();
                     world
