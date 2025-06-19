@@ -15,8 +15,11 @@ use crate::{RollbackPostUpdate, RollbackPreUpdate};
 /// # use bevy::prelude::*;
 /// # use bevy_roll_safe::prelude::*;
 /// # fn start() {
+/// fn main() {
 /// # let mut app = App::new();
-/// app.add_plugins((RollbackSchedulePlugin::new(FixedUpdate), RollbackAudioPlugin));
+///     app.add_plugins((RollbackSchedulePlugin::new(FixedUpdate), RollbackAudioPlugin));
+/// }
+///
 /// # }
 /// # #[derive(Resource)]
 /// # struct Sounds {
