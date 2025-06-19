@@ -203,23 +203,29 @@ pub fn remove_finished_sounds(
     mut commands: Commands,
     audio_sources: Res<Assets<AudioSource>>,
     time: Res<Time>,
+    mut durations: Local<HashMap<Handle<AudioSource>, Duration>>,
 ) {
     for (entity, player, start_time, settings) in rollback_audio_players.iter() {
         if let Some(audio_source) = audio_sources.get(&player.0 .0) {
             use bevy::audio::Source;
 
-            // perf: cache duration instead of calculating every frame?
-            let duration = audio_source
-                .decoder()
-                .total_duration()
-                .unwrap_or_else(|| {
-                    const FALLBACK_DURATION_SECS: u64 = 10;
-                    warn!(
-                        "Audio source {:?} has no total duration, defaulting to {} seconds. Make sure you use a format that supports querying duration.",
-                        player.0.0,
-                        FALLBACK_DURATION_SECS
-                    );
-                    std::time::Duration::from_secs(FALLBACK_DURATION_SECS)
+            // perf: cache duration instead of calculating every frame
+            let duration = durations
+                .entry(player.0.0.clone_weak())
+                .or_insert_with(|| {
+                    // if the duration is not cached, we calculate it
+                    audio_source
+                        .decoder()
+                        .total_duration()
+                        .unwrap_or_else(|| {
+                            const FALLBACK_DURATION_SECS: u64 = 10;
+                            warn!(
+                                "Audio source {:?} has no total duration, defaulting to {} seconds. Make sure you use a format that supports querying duration.",
+                                player.0.0,
+                                FALLBACK_DURATION_SECS
+                            );
+                            Duration::from_secs(FALLBACK_DURATION_SECS)
+                        })
                 });
 
             let time_played = time.elapsed() - start_time.0;
@@ -228,7 +234,7 @@ pub fn remove_finished_sounds(
             let scaled_duration = duration.div_f32(speed);
 
             if time_played >= scaled_duration {
-                debug!("despawning finished sound: {:?} {:?}", entity, player.0 .0);
+                trace!("handling finished sound: {:?} {:?}", entity, player.0 .0);
                 let mode = settings.map_or(PlaybackMode::Once, |s| s.mode);
 
                 match mode {
