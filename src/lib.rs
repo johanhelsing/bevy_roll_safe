@@ -26,6 +26,8 @@ pub mod prelude {
         RollApp, RollbackPostUpdate, RollbackPreUpdate, RollbackSchedulePlugin,
         RollbackStateTransition, RollbackUpdate,
     };
+    #[cfg(feature = "audio")]
+    pub use super::{RollbackAudioPlayer, RollbackAudioPlugin};
 }
 
 pub trait RollApp {

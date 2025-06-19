@@ -10,6 +10,25 @@ use std::time::Duration;
 use crate::{RollbackPostUpdate, RollbackPreUpdate};
 
 /// Plugin for managing rollback audio effects in a Bevy application.
+///
+/// ```rust
+/// # use bevy::prelude::*;
+/// # use bevy_roll_safe::prelude::*;
+/// # fn start() {
+/// # let mut app = App::new();
+/// app.add_plugins((RollbackSchedulePlugin::new(FixedUpdate), RollbackAudioPlugin));
+/// # }
+/// # #[derive(Resource)]
+/// # struct Sounds {
+/// #     game_over: Handle<AudioSource>,
+/// # }
+/// fn on_game_over(mut commands: Commands, sounds: Res<Sounds>) {
+///     // Play a sound effect when the game is over
+///     commands.spawn(RollbackAudioPlayer::from(
+///          AudioPlayer::new(sounds.game_over.clone())
+///     ));
+/// }
+/// ```
 pub struct RollbackAudioPlugin;
 
 impl Plugin for RollbackAudioPlugin {
