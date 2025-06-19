@@ -53,7 +53,15 @@ impl Plugin for RollbackAudioPlugin {
     }
 }
 
-/// Represents the target state for a sound effect
+/// Rollback-safe wrapper around [`AudioPlayer`].
+///
+/// Usage is almost identical to [`AudioPlayer`], but sounds will not be played
+/// directly, instead another non-rollback entity will be spawned with the
+/// actual audio player.
+///
+/// State will be synced once per frame, so if the sound effect is despawned
+/// and respawned via rollback, the sound will continue playing without
+/// interruption.
 #[derive(Component, Clone)]
 pub struct RollbackAudioPlayer(pub AudioPlayer);
 
