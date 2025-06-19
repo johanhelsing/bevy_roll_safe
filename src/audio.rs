@@ -27,11 +27,14 @@ use crate::{RollbackPostUpdate, RollbackPreUpdate};
 /// # }
 /// fn on_game_over(mut commands: Commands, sounds: Res<Sounds>) {
 ///     // Play a sound effect when the game is over
-///     commands.spawn(RollbackAudioPlayer::from(
+///     commands.spawn(RollbackAudioPlayer(
 ///          AudioPlayer::new(sounds.game_over.clone())
 ///     ));
 /// }
+///
 /// ```
+///
+/// See [`RollbackAudioPlayer`] for more details on how to use this plugin.
 pub struct RollbackAudioPlugin;
 
 impl Plugin for RollbackAudioPlugin {
@@ -52,14 +55,11 @@ impl Plugin for RollbackAudioPlugin {
 
 /// Represents the target state for a sound effect
 #[derive(Component, Clone)]
-pub struct RollbackAudioPlayer {
-    /// The actual sound effect to play
-    pub audio_player: AudioPlayer,
-}
+pub struct RollbackAudioPlayer(pub AudioPlayer);
 
 impl From<AudioPlayer> for RollbackAudioPlayer {
     fn from(audio_player: AudioPlayer) -> Self {
-        Self { audio_player }
+        Self(audio_player)
     }
 }
 
@@ -103,7 +103,7 @@ pub fn sync_rollback_sounds(
             .map(|(player, start_time, playback_settings)| {
                 (
                     PlayingRollbackAudioKey {
-                        audio_source: player.audio_player.0.clone(),
+                        audio_source: player.0 .0.clone(),
                         start_time: start_time.0,
                     },
                     playback_settings,
@@ -197,7 +197,7 @@ pub fn remove_finished_sounds(
     time: Res<Time>,
 ) {
     for (entity, player, start_time, settings) in rollback_audio_players.iter() {
-        if let Some(audio_source) = audio_sources.get(&player.audio_player.0) {
+        if let Some(audio_source) = audio_sources.get(&player.0 .0) {
             use bevy::audio::Source;
 
             // perf: cache duration instead of calculating every frame?
@@ -208,7 +208,7 @@ pub fn remove_finished_sounds(
                     const FALLBACK_DURATION_SECS: u64 = 10;
                     warn!(
                         "Audio source {:?} has no total duration, defaulting to {} seconds. Make sure you use a format that supports querying duration.",
-                        player.audio_player.0,
+                        player.0.0,
                         FALLBACK_DURATION_SECS
                     );
                     std::time::Duration::from_secs(FALLBACK_DURATION_SECS)
@@ -220,10 +220,7 @@ pub fn remove_finished_sounds(
             let scaled_duration = duration.div_f32(speed);
 
             if time_played >= scaled_duration {
-                debug!(
-                    "despawning finished sound: {:?} {:?}",
-                    entity, player.audio_player.0
-                );
+                debug!("despawning finished sound: {:?} {:?}", entity, player.0 .0);
                 let mode = settings.map_or(PlaybackMode::Once, |s| s.mode);
 
                 match mode {
