@@ -38,8 +38,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .start_synctest_session()?;
 
     App::new()
-        .add_plugins(GgrsPlugin::<GgrsConfig>::default())
-        .set_rollback_schedule_fps(60)
+        .add_plugins((
+            GgrsPlugin::<GgrsConfig>::default(),
+            RollbackSchedulePlugin::new_ggrs(),
+        ))
+        .insert_resource(RollbackFrameRate(60))
         .add_systems(ReadInputs, read_local_input)
         .rollback_component_with_copy::<Health>()
         .checksum_component_with_hash::<Health>()
@@ -54,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(OnEnter(GameplayState::InRound), spawn_player)
         .add_systems(OnEnter(GameplayState::GameOver), log_game_over)
         .add_systems(
-            GgrsSchedule,
+            RollbackUpdate,
             decrease_health
                 .after(bevy_roll_safe::apply_state_transition::<GameplayState>)
                 .run_if(in_state(GameplayState::InRound)),
