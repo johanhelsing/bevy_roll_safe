@@ -32,6 +32,8 @@ Bevy states when added through `app.init_state::<FooState>()` have two big probl
 
 This crate provides an extension method, `init_roll_state_in_schedule::<S>(schedule)`, which lets you add a state to the schedule you want, and a resource, `InitialStateEntered<S>` which can be rolled back and tracks whether the initial `OnEnter` should be run (or re-run on rollbacks to the initial frame).
 
+If you are using the rollback schedule plugin as well. Adding a rollback safe state is a simple as `app.init_roll_state::<YourState>()`.
+
 See the [`states`](https://github.com/johanhelsing/bevy_roll_safe/blob/main/examples/states.rs) example for usage with [`bevy_ggrs`].
 
 ## Default rollback schedule
