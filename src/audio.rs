@@ -211,7 +211,7 @@ pub fn remove_finished_sounds(
 
             // perf: cache duration instead of calculating every frame
             let duration = durations
-                .entry(player.0.0.clone_weak())
+                .entry(player.0.0.clone())
                 .or_insert_with(|| {
                     // if the duration is not cached, we calculate it
                     audio_source

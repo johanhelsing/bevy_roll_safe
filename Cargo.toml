@@ -16,6 +16,9 @@ math_determinism = ["bevy_math/libm"]
 audio = ["bevy/bevy_audio", "bevy/bevy_asset"]
 
 [dependencies]
-bevy = { version = "0.16", default-features = false, features = ["bevy_state"] }
-bevy_math = "0.16"
-bevy_ggrs = { version = "0.18", optional = true, default-features = false }
+bevy = { version = "0.17", default-features = false, features = ["bevy_state"] }
+bevy_math = "0.17"
+bevy_ggrs = { version = "0.19", optional = true, default-features = false }
+
+[dev-dependencies]
+bevy = { version = "0.17", default-features = false, features = ["debug"] }
