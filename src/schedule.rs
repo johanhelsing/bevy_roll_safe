@@ -1,7 +1,5 @@
 use bevy::{
-    ecs::schedule::{
-        ExecutorKind, InternedScheduleLabel, LogLevel, ScheduleBuildSettings, ScheduleLabel,
-    },
+    ecs::schedule::{InternedScheduleLabel, LogLevel, ScheduleBuildSettings, ScheduleLabel},
     prelude::*,
 };
 
@@ -47,13 +45,19 @@ pub struct RollbackUpdate;
 pub struct RollbackPostUpdate;
 
 pub struct RollbackSchedulePlugin {
-    schedule: InternedScheduleLabel,
+    schedule: Option<InternedScheduleLabel>,
+}
+
+impl Default for RollbackSchedulePlugin {
+    fn default() -> Self {
+        Self { schedule: None }
+    }
 }
 
 impl RollbackSchedulePlugin {
     pub fn new(schedule: impl ScheduleLabel + 'static) -> Self {
         Self {
-            schedule: schedule.intern(),
+            schedule: Some(schedule.intern()),
         }
     }
 
@@ -65,10 +69,6 @@ impl RollbackSchedulePlugin {
 
 impl Plugin for RollbackSchedulePlugin {
     fn build(&self, app: &mut App) {
-        // simple "facilitator" schedules benefit from simpler single threaded scheduling
-        let mut rollback_schedule = Schedule::new(self.schedule);
-        rollback_schedule.set_executor_kind(ExecutorKind::SingleThreaded);
-
         for label in RollbackScheduleOrder::default().labels {
             app.edit_schedule(label, |schedule| {
                 schedule.set_build_settings(ScheduleBuildSettings {
@@ -78,8 +78,11 @@ impl Plugin for RollbackSchedulePlugin {
             });
         }
 
-        app.insert_resource(RollbackScheduleOrder::default())
-            .add_systems(self.schedule, run_schedules);
+        app.insert_resource(RollbackScheduleOrder::default());
+
+        if let Some(schedule) = self.schedule {
+            app.add_systems(schedule, run_roll_schedules);
+        }
     }
 }
 
@@ -105,7 +108,18 @@ impl Default for RollbackScheduleOrder {
     }
 }
 
-fn run_schedules(world: &mut World) {
+/// Exclusive system that runs all rollback schedules in order.
+///
+/// Can be added to any schedule, or called manually from an exclusive system:
+///
+/// ```rust,no_run
+/// # use bevy::prelude::*;
+/// # use bevy_roll_safe::prelude::*;
+/// // Wire up manually:
+/// # let mut app = App::new();
+/// app.add_systems(FixedUpdate, run_roll_schedules);
+/// ```
+pub fn run_roll_schedules(world: &mut World) {
     world.resource_scope(|world, order: Mut<RollbackScheduleOrder>| {
         for label in &order.labels {
             trace!("Running rollback schedule: {:?}", label);
