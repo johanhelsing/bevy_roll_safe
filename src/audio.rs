@@ -146,11 +146,16 @@ pub fn sync_rollback_sounds(
 
         debug!("Spawning sound: {:?}", sound.audio_source);
 
-        let settings = settings.cloned().unwrap_or(PlaybackSettings::ONCE);
+        let mut instance_settings = settings.cloned().unwrap_or(PlaybackSettings::ONCE);
+        // Override mode: the rollback system manages lifecycle via
+        // remove_finished_sounds/sync_rollback_sounds. Passing Despawn/Remove
+        // through would let Bevy's audio system destroy the instance early,
+        // causing sync_rollback_sounds to re-spawn it in a loop.
+        instance_settings.mode = PlaybackMode::Once;
 
         commands.spawn((
             AudioPlayer::new(sound.audio_source.clone()),
-            settings,
+            instance_settings,
             RollbackAudioPlayerInstance {
                 desired_start_time: sound.start_time,
             },
