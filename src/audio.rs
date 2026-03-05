@@ -48,7 +48,6 @@ impl Plugin for RollbackAudioPlugin {
             app.rollback_component_with_clone::<RollbackAudioPlayer>();
             app.rollback_component_with_clone::<RollbackAudioPlayerStartTime>();
             app.rollback_component_with_clone::<PlaybackSettings>();
-            app.add_systems(RollbackPostUpdate, add_rollback_to_rollback_sounds);
         }
     }
 }
@@ -62,7 +61,9 @@ impl Plugin for RollbackAudioPlugin {
 /// State will be synced once per frame, so if the sound effect is despawned
 /// and respawned via rollback, the sound will continue playing without
 /// interruption.
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
+#[cfg_attr(feature = "bevy_ggrs", require(bevy_ggrs::Rollback))]
 pub struct RollbackAudioPlayer(pub AudioPlayer);
 
 impl From<AudioPlayer> for RollbackAudioPlayer {
@@ -72,7 +73,8 @@ impl From<AudioPlayer> for RollbackAudioPlayer {
 }
 
 /// When the sound effect should have started playing
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Reflect)]
+#[reflect(Component)]
 pub struct RollbackAudioPlayerStartTime(pub Duration);
 
 /// Represents an instance of a rollback sound effect that is currently playing
@@ -174,22 +176,6 @@ pub fn start_rollback_sounds(
         commands
             .entity(entity)
             .insert(RollbackAudioPlayerStartTime(start_time));
-    }
-}
-
-/// Automatically adds [`bevy_ggrs::Rollback`] to [`RollbackAudioPlayer`]s that are missing it.
-#[cfg(feature = "bevy_ggrs")]
-fn add_rollback_to_rollback_sounds(
-    mut commands: Commands,
-    mut rollback_audio_players: Query<
-        Entity,
-        (With<RollbackAudioPlayer>, Without<bevy_ggrs::Rollback>),
-    >,
-) {
-    for entity in rollback_audio_players.iter_mut() {
-        use bevy_ggrs::AddRollbackCommandExtension;
-        debug!("adding ggrs rollback to audio player: {entity:?}");
-        commands.entity(entity).add_rollback();
     }
 }
 

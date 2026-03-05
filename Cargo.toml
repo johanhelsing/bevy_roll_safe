@@ -18,7 +18,7 @@ audio = ["bevy/bevy_audio", "bevy/bevy_asset"]
 [dependencies]
 bevy = { version = "0.18", default-features = false, features = ["bevy_state"] }
 bevy_math = "0.18"
-bevy_ggrs = { version = "0.20", optional = true, default-features = false }
+bevy_ggrs = { git = "https://github.com/johanhelsing/bevy_ggrs", branch = "tardis", optional = true, default-features = false }
 
 [dev-dependencies]
 bevy = { version = "0.18", default-features = false, features = ["debug"] }
