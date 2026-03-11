@@ -22,6 +22,13 @@ use bevy::{
 
 pub struct RollbackStateTransition;
 
+/// The first schedule to run in the rollback tick, mirroring Bevy's [`First`].
+///
+/// Use this for engine-level setup that must happen before any gameplay systems,
+/// such as updating deterministic time resources. Runs before [`RollbackPreUpdate`].
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RollbackFirst;
+
 /// The schedule that contains logic that must run before [`RollbackUpdate`]. For example, a system that reads raw keyboard
 /// input OS events into an `Events` resource. This enables systems in [`RollbackUpdate`] to consume the events from the `Events`
 /// resource without actually knowing about (or taking a direct scheduler dependency on) the "os-level keyboard event system".
@@ -43,6 +50,13 @@ pub struct RollbackUpdate;
 /// [`RollbackPostUpdate`] abstracts out "implementation details" from users defining systems in [`RollbackUpdate`].
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RollbackPostUpdate;
+
+/// The last schedule to run in the rollback tick, mirroring Bevy's [`Last`].
+///
+/// Use this for engine-level cleanup that must happen after all gameplay systems,
+/// such as restoring `Time<()>` to its non-rollback value. Runs after [`RollbackPostUpdate`].
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RollbackLast;
 
 pub struct RollbackSchedulePlugin {
     schedule: Option<InternedScheduleLabel>,
@@ -99,10 +113,12 @@ impl Default for RollbackScheduleOrder {
     fn default() -> Self {
         Self {
             labels: vec![
+                RollbackFirst.intern(),
                 RollbackPreUpdate.intern(),
                 RollbackStateTransition.intern(),
                 RollbackUpdate.intern(),
                 RollbackPostUpdate.intern(),
+                RollbackLast.intern(),
             ],
         }
     }
