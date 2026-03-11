@@ -58,14 +58,9 @@ pub struct RollbackPostUpdate;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RollbackLast;
 
+#[derive(Default)]
 pub struct RollbackSchedulePlugin {
     schedule: Option<InternedScheduleLabel>,
-}
-
-impl Default for RollbackSchedulePlugin {
-    fn default() -> Self {
-        Self { schedule: None }
-    }
 }
 
 impl RollbackSchedulePlugin {
