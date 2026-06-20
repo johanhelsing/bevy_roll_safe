@@ -192,9 +192,8 @@ fn add_rollback_to_rollback_sounds(
     >,
 ) {
     for entity in rollback_audio_players.iter_mut() {
-        use bevy_ggrs::AddRollbackCommandExtension;
         debug!("adding ggrs rollback to audio player: {entity:?}");
-        commands.entity(entity).add_rollback();
+        commands.entity(entity).insert(bevy_ggrs::Rollback);
     }
 }
 
