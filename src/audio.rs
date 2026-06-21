@@ -61,7 +61,8 @@ impl Plugin for RollbackAudioPlugin {
 /// State will be synced once per frame, so if the sound effect is despawned
 /// and respawned via rollback, the sound will continue playing without
 /// interruption.
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
 #[cfg_attr(feature = "bevy_ggrs", require(bevy_ggrs::Rollback))]
 pub struct RollbackAudioPlayer(pub AudioPlayer);
 
@@ -72,7 +73,8 @@ impl From<AudioPlayer> for RollbackAudioPlayer {
 }
 
 /// When the sound effect should have started playing
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Reflect)]
+#[reflect(Component)]
 pub struct RollbackAudioPlayerStartTime(pub Duration);
 
 /// Represents an instance of a rollback sound effect that is currently playing
