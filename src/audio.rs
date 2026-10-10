@@ -11,7 +11,9 @@
 //!   [`RollbackAudioPlugin::keep_for`]. Add it wherever the simulation runs,
 //!   headless included.
 //! - [`RollbackAudioPlaybackPlugin`] (presentation): once per frame, plays
-//!   each intent it has not played yet, keyed by `(path, start time)`.
+//!   each intent it has not played yet, keyed by `(path, start time)`. It
+//!   reads the simulation clock as `Time<C>`: a clock the game keeps in step
+//!   with the rollback schedule's `Time` and rolls back.
 //!
 //! An intent lives only as long as a rollback could still take it back, which
 //! is what `keep_for` is: at least the longest rollback the session can do
@@ -28,7 +30,7 @@
 //! A resimulation that re-crosses the same edge spawns an intent with the same
 //! key, which matches the sound already playing, so it is not played twice.
 
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, marker::PhantomData, time::Duration};
 
 use bevy::{
     audio::PlaybackMode,
@@ -51,7 +53,8 @@ use crate::{RollbackPostUpdate, RollbackPreUpdate};
 ///     app.add_plugins((
 ///         RollbackSchedulePlugin::new(FixedUpdate),
 ///         RollbackAudioPlugin::default(),
-///         RollbackAudioPlaybackPlugin, // only where sound is played
+///         // Only where sound is played, reading your rolled-back sim clock.
+///         RollbackAudioPlaybackPlugin::<Fixed>::default(),
 ///     ));
 /// }
 /// # }
@@ -76,34 +79,41 @@ impl Default for RollbackAudioPlugin {
 impl Plugin for RollbackAudioPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(RollbackAudioKeepFor(self.keep_for));
-        app.init_resource::<RollbackAudioTime>();
         app.add_systems(
             RollbackPreUpdate,
             expire_rollback_sounds.in_set(RollbackAudioSystems),
         );
         app.add_systems(
             RollbackPostUpdate,
-            (start_rollback_sounds, update_rollback_audio_time)
-                .chain()
-                .in_set(RollbackAudioSystems),
+            start_rollback_sounds.in_set(RollbackAudioSystems),
         );
     }
 }
 
 /// The simulation systems of [`RollbackAudioPlugin`], in `RollbackPreUpdate`
-/// (expiry) and `RollbackPostUpdate` (start times, the clock), for ordering
+/// (expiry) and `RollbackPostUpdate` (start times), for ordering
 /// your own systems against.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RollbackAudioSystems;
 
 /// Presentation half of rollback audio: plays the intents.
 ///
-/// Needs [`RollbackAudioPlugin`] and Bevy's audio and asset plugins.
-pub struct RollbackAudioPlaybackPlugin;
+/// `Time<C>` is the simulation clock as of the last tick: the same elapsed
+/// time the rollback schedule's `Time` had on it, and rolled back with the
+/// world, so a seek or a rollback to an earlier tick takes it back too.
+/// Playback compares start times against it. Needs [`RollbackAudioPlugin`]
+/// and Bevy's audio and asset plugins.
+pub struct RollbackAudioPlaybackPlugin<C>(PhantomData<C>);
 
-impl Plugin for RollbackAudioPlaybackPlugin {
+impl<C> Default for RollbackAudioPlaybackPlugin<C> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<C: Default + Send + Sync + 'static> Plugin for RollbackAudioPlaybackPlugin<C> {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, sync_rollback_sounds);
+        app.add_systems(Update, sync_rollback_sounds::<C>);
     }
 }
 
@@ -132,16 +142,6 @@ impl RollbackAudioPlayer {
 #[cfg_attr(feature = "bevy_ggrs", reflect(Component, Rollback))]
 #[cfg_attr(not(feature = "bevy_ggrs"), reflect(Component))]
 pub struct RollbackAudioPlayerStartTime(pub Duration);
-
-/// The rollback time the world is at, as of the last tick: what playback
-/// compares start times against. Rolled back, so a seek or a rollback that
-/// loads an earlier tick takes it back with it.
-#[derive(Resource, Clone, Copy, Debug, Default, Reflect)]
-#[cfg_attr(feature = "bevy_ggrs", derive(bevy_ggrs::Rollback))]
-#[cfg_attr(feature = "bevy_ggrs", rollback(resource, copy))]
-#[cfg_attr(feature = "bevy_ggrs", reflect(Resource, Rollback))]
-#[cfg_attr(not(feature = "bevy_ggrs"), reflect(Resource))]
-pub struct RollbackAudioTime(pub Duration);
 
 /// [`RollbackAudioPlugin::keep_for`], for playback to tell an undone intent
 /// from an expired one.
@@ -189,17 +189,12 @@ pub fn expire_rollback_sounds(
     }
 }
 
-/// Record the rollback time this tick ran at.
-pub fn update_rollback_audio_time(mut now: ResMut<RollbackAudioTime>, time: Res<Time>) {
-    now.0 = time.elapsed();
-}
-
 /// Play each intent not played yet, and cut the sound of one a rollback undid.
-pub fn sync_rollback_sounds(
+pub fn sync_rollback_sounds<C: Default + Send + Sync + 'static>(
     mut commands: Commands,
     intents: Query<(&RollbackAudioPlayer, &RollbackAudioPlayerStartTime)>,
     instances: Query<(), With<RollbackAudioPlayerInstance>>,
-    now: Res<RollbackAudioTime>,
+    now: Res<Time<C>>,
     keep_for: Res<RollbackAudioKeepFor>,
     asset_server: Res<AssetServer>,
     mut played: Local<HashMap<(Cow<'static, str>, Duration), Entity>>,
@@ -211,7 +206,7 @@ pub fn sync_rollback_sounds(
 
     // Forget intents that are gone: cut the sound when a rollback or a seek
     // undid it, let it play out when it expired.
-    let undone_after = now.0.saturating_sub(keep_for.0);
+    let undone_after = now.elapsed().saturating_sub(keep_for.0);
     played.retain(|key, instance| {
         if desired.contains(key) {
             return true;
