@@ -1,15 +1,46 @@
+//! Rollback-safe one-shot sound effects.
+//!
+//! The simulation declares a sound by spawning a [`RollbackAudioPlayer`]: an
+//! *intent* naming the sound by asset path. It is ordinary rolled-back state,
+//! and nothing about it depends on whether audio exists, so a headless run of
+//! the simulation spawns and despawns exactly the same intents as a windowed
+//! one. Playback is a separate, presentation-only plugin.
+//!
+//! - [`RollbackAudioPlugin`] (simulation): stamps each new intent with the
+//!   rollback time it started at, and despawns it once it is older than
+//!   [`RollbackAudioPlugin::keep_for`]. Add it wherever the simulation runs,
+//!   headless included.
+//! - [`RollbackAudioPlaybackPlugin`] (presentation): once per frame, plays
+//!   each intent it has not played yet, keyed by `(path, start time)`.
+//!
+//! An intent lives only as long as a rollback could still take it back, which
+//! is what `keep_for` is: at least the longest rollback the session can do
+//! (the GGRS max prediction window), plus room for a slow frame so playback
+//! sees every intent at least once. It has nothing to do with the length of
+//! the clip, so no asset is ever read to decide it.
+//!
+//! When an intent disappears, its start time says why:
+//!
+//! - started less than `keep_for` before the rollback clock, or after it (a
+//!   seek back before the sound): a rollback undid it, and the sound is cut;
+//! - started earlier: it expired, and the sound plays out to its end.
+//!
+//! A resimulation that re-crosses the same edge spawns an intent with the same
+//! key, which matches the sound already playing, so it is not played twice.
+
+use std::{borrow::Cow, time::Duration};
+
 use bevy::{
     audio::PlaybackMode,
     platform::collections::{HashMap, HashSet},
     prelude::*,
 };
 #[cfg(feature = "bevy_ggrs")]
-use bevy_ggrs::RollbackApp;
-use std::time::Duration;
+use bevy_ggrs::ReflectRollback;
 
 use crate::{RollbackPostUpdate, RollbackPreUpdate};
 
-/// Plugin for managing rollback audio effects in a Bevy application.
+/// Simulation half of rollback audio: start times and expiry.
 ///
 /// ```rust
 /// # use bevy::prelude::*;
@@ -17,156 +48,117 @@ use crate::{RollbackPostUpdate, RollbackPreUpdate};
 /// # fn start() {
 /// fn main() {
 /// # let mut app = App::new();
-///     app.add_plugins((RollbackSchedulePlugin::new(FixedUpdate), RollbackAudioPlugin));
-/// }
-///
-/// # }
-/// # #[derive(Resource)]
-/// # struct Sounds {
-/// #     game_over: Handle<AudioSource>,
-/// # }
-/// fn on_game_over(mut commands: Commands, sounds: Res<Sounds>) {
-///     // Play a sound effect when the game is over
-///     commands.spawn(RollbackAudioPlayer(
-///          AudioPlayer::new(sounds.game_over.clone())
+///     app.add_plugins((
+///         RollbackSchedulePlugin::new(FixedUpdate),
+///         RollbackAudioPlugin::default(),
+///         RollbackAudioPlaybackPlugin, // only where sound is played
 ///     ));
 /// }
-///
+/// # }
+/// fn on_game_over(mut commands: Commands) {
+///     commands.spawn(RollbackAudioPlayer::new("sounds/game_over.ogg"));
+/// }
 /// ```
-///
-/// See [`RollbackAudioPlayer`] for more details on how to use this plugin.
-pub struct RollbackAudioPlugin;
+pub struct RollbackAudioPlugin {
+    /// How long an intent lives after it starts, in rollback time. Must cover
+    /// the longest rollback the session can do; see the module docs.
+    pub keep_for: Duration,
+}
+
+impl Default for RollbackAudioPlugin {
+    fn default() -> Self {
+        Self {
+            keep_for: Duration::from_millis(250),
+        }
+    }
+}
 
 impl Plugin for RollbackAudioPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(RollbackAudioKeepFor(self.keep_for));
+        app.init_resource::<RollbackAudioTime>();
+        app.add_systems(
+            RollbackPreUpdate,
+            expire_rollback_sounds.in_set(RollbackAudioSystems),
+        );
+        app.add_systems(
+            RollbackPostUpdate,
+            (start_rollback_sounds, update_rollback_audio_time)
+                .chain()
+                .in_set(RollbackAudioSystems),
+        );
+    }
+}
+
+/// The simulation systems of [`RollbackAudioPlugin`], in `RollbackPreUpdate`
+/// (expiry) and `RollbackPostUpdate` (start times, the clock), for ordering
+/// your own systems against.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RollbackAudioSystems;
+
+/// Presentation half of rollback audio: plays the intents.
+///
+/// Needs [`RollbackAudioPlugin`] and Bevy's audio and asset plugins.
+pub struct RollbackAudioPlaybackPlugin;
+
+impl Plugin for RollbackAudioPlaybackPlugin {
+    fn build(&self, app: &mut App) {
         app.add_systems(Update, sync_rollback_sounds);
-        app.add_systems(RollbackPreUpdate, remove_finished_sounds);
-        app.add_systems(RollbackPostUpdate, start_rollback_sounds);
-
-        #[cfg(feature = "bevy_ggrs")]
-        {
-            app.rollback_component_with_clone::<RollbackAudioPlayer>();
-            app.rollback_component_with_clone::<RollbackAudioPlayerStartTime>();
-            app.rollback_component_with_clone::<PlaybackSettings>();
-        }
     }
 }
 
-/// Rollback-safe wrapper around [`AudioPlayer`].
+/// A one-shot sound the simulation declares, named by asset path.
 ///
-/// Usage is almost identical to [`AudioPlayer`], but sounds will not be played
-/// directly, instead another non-rollback entity will be spawned with the
-/// actual audio player.
-///
-/// State will be synced once per frame, so if the sound effect is despawned
-/// and respawned via rollback, the sound will continue playing without
-/// interruption.
-#[derive(Component, Clone, Reflect)]
-#[reflect(Component)]
-#[cfg_attr(feature = "bevy_ggrs", require(bevy_ggrs::Rollback))]
-pub struct RollbackAudioPlayer(pub AudioPlayer);
-
-impl From<AudioPlayer> for RollbackAudioPlayer {
-    fn from(audio_player: AudioPlayer) -> Self {
-        Self(audio_player)
-    }
-}
-
-/// When the sound effect should have started playing
+/// Spawn it from a rollback schedule on the tick the sound should start. It is
+/// write-only intent: playback reads it, nothing in the simulation should.
 #[derive(Component, Clone, Debug, Reflect)]
-#[reflect(Component)]
+#[cfg_attr(feature = "bevy_ggrs", derive(bevy_ggrs::Rollback))]
+#[cfg_attr(feature = "bevy_ggrs", rollback(clone, marker))]
+#[cfg_attr(feature = "bevy_ggrs", reflect(Component, Rollback))]
+#[cfg_attr(not(feature = "bevy_ggrs"), reflect(Component))]
+pub struct RollbackAudioPlayer(pub Cow<'static, str>);
+
+impl RollbackAudioPlayer {
+    pub fn new(path: impl Into<Cow<'static, str>>) -> Self {
+        Self(path.into())
+    }
+}
+
+/// The rollback time an intent started at. Added by [`start_rollback_sounds`]
+/// in `RollbackPostUpdate` of the tick it was spawned on.
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[cfg_attr(feature = "bevy_ggrs", derive(bevy_ggrs::Rollback))]
+#[cfg_attr(feature = "bevy_ggrs", rollback(copy))]
+#[cfg_attr(feature = "bevy_ggrs", reflect(Component, Rollback))]
+#[cfg_attr(not(feature = "bevy_ggrs"), reflect(Component))]
 pub struct RollbackAudioPlayerStartTime(pub Duration);
 
-/// Represents an instance of a rollback sound effect that is currently playing
+/// The rollback time the world is at, as of the last tick: what playback
+/// compares start times against. Rolled back, so a seek or a rollback that
+/// loads an earlier tick takes it back with it.
+#[derive(Resource, Clone, Copy, Debug, Default, Reflect)]
+#[cfg_attr(feature = "bevy_ggrs", derive(bevy_ggrs::Rollback))]
+#[cfg_attr(feature = "bevy_ggrs", rollback(resource, copy))]
+#[cfg_attr(feature = "bevy_ggrs", reflect(Resource, Rollback))]
+#[cfg_attr(not(feature = "bevy_ggrs"), reflect(Resource))]
+pub struct RollbackAudioTime(pub Duration);
+
+/// [`RollbackAudioPlugin::keep_for`], for playback to tell an undone intent
+/// from an expired one.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct RollbackAudioKeepFor(pub Duration);
+
+/// A sound that is playing for an intent. Despawned by Bevy when it ends.
 #[derive(Component)]
 pub struct RollbackAudioPlayerInstance {
-    /// The desired start time in the rollback world's time
-    desired_start_time: Duration,
+    /// The rollback time its intent started at.
+    pub start_time: Duration,
 }
 
-#[derive(PartialEq, Eq, Hash)]
-struct PlayingRollbackAudioKey {
-    audio_source: Handle<AudioSource>,
-    start_time: Duration,
-    // TODO: add more keys as appropriate if sound effects are colliding
-}
-
-/// Updates playing sounds to match the desired state
-/// spawns any missing sounds that should be playing.
-/// and despawns any sounds that should not be playing.
-pub fn sync_rollback_sounds(
-    mut commands: Commands,
-    rollback_audio_players: Query<(
-        &RollbackAudioPlayer,
-        &RollbackAudioPlayerStartTime,
-        Option<&PlaybackSettings>,
-    )>,
-    instances: Query<(Entity, &RollbackAudioPlayerInstance, &AudioPlayer)>,
-) {
-    // todo: Ideally we would use a HashSet with settings, but PlaybackSettings
-    // is not hashable. So we use a HashMap with the key being the audio source
-    // and start time. This likely leads to some collisions, but leaving as is
-    // for now.
-    let desired_state: HashMap<PlayingRollbackAudioKey, Option<&PlaybackSettings>> =
-        rollback_audio_players
-            .iter()
-            .map(|(player, start_time, playback_settings)| {
-                (
-                    PlayingRollbackAudioKey {
-                        audio_source: player.0 .0.clone(),
-                        start_time: start_time.0,
-                    },
-                    playback_settings,
-                )
-            })
-            .collect();
-
-    let mut playing_sounds = HashSet::new();
-
-    for (instance_entity, instance, audio_player) in &instances {
-        let rollback_sound_key = PlayingRollbackAudioKey {
-            audio_source: audio_player.0.clone(),
-            start_time: instance.desired_start_time,
-        };
-
-        // if the playing sound is not in the desired state, despawn it
-        if !desired_state.contains_key(&rollback_sound_key) {
-            commands.entity(instance_entity).despawn();
-        } else {
-            playing_sounds.insert(rollback_sound_key);
-        }
-    }
-
-    // spawn any missing sounds
-    for (sound, settings) in desired_state {
-        if playing_sounds.contains(&sound) {
-            // if the sound is already playing, skip it
-            continue;
-        }
-
-        debug!("Spawning sound: {:?}", sound.audio_source);
-
-        let mut instance_settings = settings.cloned().unwrap_or(PlaybackSettings::ONCE);
-        // Override mode: the rollback system manages lifecycle via
-        // remove_finished_sounds/sync_rollback_sounds. Passing Despawn/Remove
-        // through would let Bevy's audio system destroy the instance early,
-        // causing sync_rollback_sounds to re-spawn it in a loop.
-        instance_settings.mode = PlaybackMode::Once;
-
-        commands.spawn((
-            AudioPlayer::new(sound.audio_source.clone()),
-            instance_settings,
-            RollbackAudioPlayerInstance {
-                desired_start_time: sound.start_time,
-            },
-        ));
-    }
-}
-
-/// Starts the rollback sounds by recording the current time as the start time
+/// Stamp each new intent with the rollback time it starts at.
 pub fn start_rollback_sounds(
     mut commands: Commands,
-    mut rollback_audio_players: Query<
+    new: Query<
         Entity,
         (
             With<RollbackAudioPlayer>,
@@ -176,78 +168,74 @@ pub fn start_rollback_sounds(
     time: Res<Time>,
 ) {
     let start_time = time.elapsed();
-    for entity in rollback_audio_players.iter_mut() {
-        trace!("adding RollbackAudioPlayerStartTime: {entity:?} {start_time:?}");
+    for entity in &new {
         commands
             .entity(entity)
             .insert(RollbackAudioPlayerStartTime(start_time));
     }
 }
 
-pub fn remove_finished_sounds(
-    rollback_audio_players: Query<(
-        Entity,
-        &RollbackAudioPlayer,
-        &RollbackAudioPlayerStartTime,
-        Option<&PlaybackSettings>,
-    )>,
+/// Despawn each intent `keep_for` after it started.
+pub fn expire_rollback_sounds(
     mut commands: Commands,
-    audio_sources: Res<Assets<AudioSource>>,
+    intents: Query<(Entity, &RollbackAudioPlayerStartTime)>,
+    keep_for: Res<RollbackAudioKeepFor>,
     time: Res<Time>,
-    mut durations: Local<HashMap<Handle<AudioSource>, Duration>>,
 ) {
-    for (entity, player, start_time, settings) in rollback_audio_players.iter() {
-        if let Some(audio_source) = audio_sources.get(&player.0 .0) {
-            use bevy::audio::Source;
-
-            // perf: cache duration instead of calculating every frame
-            let duration = durations
-                .entry(player.0.0.clone())
-                .or_insert_with(|| {
-                    // if the duration is not cached, we calculate it
-                    audio_source
-                        .decoder()
-                        .total_duration()
-                        .unwrap_or_else(|| {
-                            const FALLBACK_DURATION_SECS: u64 = 10;
-                            warn!(
-                                "Audio source {:?} has no total duration, defaulting to {} seconds. Make sure you use a format that supports querying duration.",
-                                player.0.0,
-                                FALLBACK_DURATION_SECS
-                            );
-                            Duration::from_secs(FALLBACK_DURATION_SECS)
-                        })
-                });
-
-            let time_played = time.elapsed() - start_time.0;
-
-            let speed = settings.map_or(1.0, |s| s.speed);
-            let scaled_duration = duration.div_f32(speed);
-
-            if time_played >= scaled_duration {
-                trace!("handling finished sound: {:?} {:?}", entity, player.0 .0);
-                let mode = settings.map_or(PlaybackMode::Once, |s| s.mode);
-
-                match mode {
-                    PlaybackMode::Despawn => commands.entity(entity).despawn(),
-                    PlaybackMode::Remove => {
-                        commands.entity(entity).remove::<(
-                            RollbackAudioPlayer,
-                            RollbackAudioPlayerStartTime,
-                            PlaybackSettings,
-                        )>();
-                    }
-                    // if we just leave it alone, it will continue existing in both rollback and regular version
-                    PlaybackMode::Once => {}
-                    PlaybackMode::Loop => {
-                        // if the sound is looping, we don't despawn it, but we can reset the start time
-                        // which will change the desired state and trigger a new sound to be played
-                        commands
-                            .entity(entity)
-                            .insert(RollbackAudioPlayerStartTime(time.elapsed()));
-                    }
-                }
-            }
+    for (entity, start) in &intents {
+        if start.0 + keep_for.0 <= time.elapsed() {
+            commands.entity(entity).despawn();
         }
+    }
+}
+
+/// Record the rollback time this tick ran at.
+pub fn update_rollback_audio_time(mut now: ResMut<RollbackAudioTime>, time: Res<Time>) {
+    now.0 = time.elapsed();
+}
+
+/// Play each intent not played yet, and cut the sound of one a rollback undid.
+pub fn sync_rollback_sounds(
+    mut commands: Commands,
+    intents: Query<(&RollbackAudioPlayer, &RollbackAudioPlayerStartTime)>,
+    instances: Query<(), With<RollbackAudioPlayerInstance>>,
+    now: Res<RollbackAudioTime>,
+    keep_for: Res<RollbackAudioKeepFor>,
+    asset_server: Res<AssetServer>,
+    mut played: Local<HashMap<(Cow<'static, str>, Duration), Entity>>,
+) {
+    let desired: HashSet<(Cow<'static, str>, Duration)> = intents
+        .iter()
+        .map(|(player, start)| (player.0.clone(), start.0))
+        .collect();
+
+    // Forget intents that are gone: cut the sound when a rollback or a seek
+    // undid it, let it play out when it expired.
+    let undone_after = now.0.saturating_sub(keep_for.0);
+    played.retain(|key, instance| {
+        if desired.contains(key) {
+            return true;
+        }
+        if key.1 > undone_after && instances.contains(*instance) {
+            commands.entity(*instance).despawn();
+        }
+        false
+    });
+
+    for key in desired {
+        if played.contains_key(&key) {
+            continue;
+        }
+        let instance = commands
+            .spawn((
+                AudioPlayer::<AudioSource>(asset_server.load(key.0.to_string())),
+                PlaybackSettings {
+                    mode: PlaybackMode::Despawn,
+                    ..default()
+                },
+                RollbackAudioPlayerInstance { start_time: key.1 },
+            ))
+            .id();
+        played.insert(key, instance);
     }
 }

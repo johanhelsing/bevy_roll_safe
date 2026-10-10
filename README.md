@@ -17,10 +17,9 @@ Some of Bevy's features can't be used in a rollback context (with crates such as
   - [x] `OnEnter`/`OnLeave`/`OnTransition`
 - [x] FrameCount
 - [x] Rollback-safe "Main"/default schedules
-- [x] Audio playback
-  - [x] Support all `PlaybackMode`s
+- [x] Audio playback (one-shots)
+  - [x] Support for formats that don't report sound durations (mp3/ogg)
   - [ ] Support for seeking in "time-critical" audio
-  - [ ] Support for formats that don't report sound durations (mp3/ogg)
 - [ ] Events
 
 ## States
@@ -44,7 +43,7 @@ The plugin takes a parent schedule as input, so it can easily be added to the gg
 
 ## Rollback audio
 
-`RollbackAudioPlugin` lets you easily play sound effects from a rollback world without duplicate sounds playing over each other. It depends on the `RollbackSchedulePlugin`, or you need to add the maintenance system in a similar order to your own schedules.
+`RollbackAudioPlugin` lets you play one-shot sound effects from a rollback world without duplicate sounds playing over each other. The simulation spawns a `RollbackAudioPlayer` naming the sound by asset path; it lives for `keep_for` of rollback time, which must cover your longest rollback, and nothing about it depends on audio, so a headless simulation spawns the same entities as a windowed one. `RollbackAudioPlaybackPlugin`, added only where sound is played, plays each intent once, cuts one a rollback undid, and lets an expired one play to its end. It depends on the `RollbackSchedulePlugin`, or you need to add its systems in a similar order to your own schedules.
 
 ## Cargo features
 
