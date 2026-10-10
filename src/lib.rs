@@ -12,8 +12,10 @@ mod schedule;
 // re-exports
 #[cfg(feature = "audio")]
 pub use audio::{
-    remove_finished_sounds, start_rollback_sounds, sync_rollback_sounds, RollbackAudioPlayer,
-    RollbackAudioPlayerInstance, RollbackAudioPlugin,
+    expire_rollback_sounds, start_rollback_sounds, sync_rollback_sounds,
+    update_rollback_audio_time, RollbackAudioKeepFor, RollbackAudioPlaybackPlugin,
+    RollbackAudioPlayer, RollbackAudioPlayerInstance, RollbackAudioPlayerStartTime,
+    RollbackAudioPlugin, RollbackAudioSystems, RollbackAudioTime,
 };
 pub use frame_count::{increase_frame_count, RollFrameCount};
 pub use schedule::{
@@ -27,7 +29,7 @@ pub mod prelude {
         RollbackPreUpdate, RollbackSchedulePlugin, RollbackStateTransition, RollbackUpdate,
     };
     #[cfg(feature = "audio")]
-    pub use super::{RollbackAudioPlayer, RollbackAudioPlugin};
+    pub use super::{RollbackAudioPlaybackPlugin, RollbackAudioPlayer, RollbackAudioPlugin};
 }
 
 pub trait RollApp {
