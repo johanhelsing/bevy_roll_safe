@@ -31,7 +31,7 @@ struct Health(u32);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session = SessionBuilder::<GgrsConfig>::new()
-        .with_num_players(1)
+        .with_num_players(1)?
         // each frame, roll back and resimulate 5 frames back in time, and compare checksums
         .with_check_distance(5)
         .add_player(PlayerType::Local, 0)?
@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn spawn_player(mut commands: Commands) {
     info!("spawning player");
-    commands.spawn(Health(10)).add_rollback();
+    commands.spawn((Health(10), bevy_ggrs::Rollback));
 }
 
 fn decrease_health(
