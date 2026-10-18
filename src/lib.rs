@@ -19,13 +19,14 @@ pub use audio::{
 pub use frame_count::{increase_frame_count, RollFrameCount};
 pub use schedule::{
     run_roll_schedules, RollbackFirst, RollbackLast, RollbackPostUpdate, RollbackPreUpdate,
-    RollbackSchedulePlugin, RollbackStateTransition, RollbackUpdate,
+    RollbackScheduleOrder, RollbackSchedulePlugin, RollbackStateTransition, RollbackUpdate,
 };
 
 pub mod prelude {
     pub use super::{
         run_roll_schedules, RollApp, RollbackFirst, RollbackLast, RollbackPostUpdate,
-        RollbackPreUpdate, RollbackSchedulePlugin, RollbackStateTransition, RollbackUpdate,
+        RollbackPreUpdate, RollbackScheduleOrder, RollbackSchedulePlugin, RollbackStateTransition,
+        RollbackUpdate,
     };
     #[cfg(feature = "audio")]
     pub use super::{RollbackAudioPlaybackPlugin, RollbackAudioPlayer, RollbackAudioPlugin};
