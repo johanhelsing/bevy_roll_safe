@@ -95,11 +95,27 @@ impl Plugin for RollbackSchedulePlugin {
     }
 }
 
-//TODO: expose in public API?
-/// Defines the schedules to be run for the rollback schedule, including
-/// their order.
-#[derive(Resource, Debug)]
-struct RollbackScheduleOrder {
+/// The schedules one rollback tick runs, in the order [`run_roll_schedules`]
+/// runs them. Inserted by [`RollbackSchedulePlugin`].
+///
+/// Read it to configure every rollback schedule at once, for instance to run
+/// them on the single-threaded executor:
+///
+/// ```rust
+/// # use bevy::prelude::*;
+/// # use bevy::ecs::schedule::SingleThreadedExecutor;
+/// # use bevy_roll_safe::prelude::*;
+/// let mut app = App::new();
+/// app.add_plugins(RollbackSchedulePlugin::default());
+/// let labels = app.world().resource::<RollbackScheduleOrder>().labels.clone();
+/// for label in labels {
+///     app.edit_schedule(label, |schedule| {
+///         schedule.set_executor(SingleThreadedExecutor::new());
+///     });
+/// }
+/// ```
+#[derive(Resource, Debug, Clone)]
+pub struct RollbackScheduleOrder {
     /// The labels to run for the main phase of the rollback schedule (in the order they will be run).
     pub labels: Vec<InternedScheduleLabel>,
 }
