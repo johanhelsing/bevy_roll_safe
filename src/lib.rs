@@ -13,8 +13,8 @@ mod schedule;
 #[cfg(feature = "audio")]
 pub use audio::{
     expire_rollback_sounds, start_rollback_sounds, sync_rollback_sounds, RollbackAudioKeepFor,
-    RollbackAudioPlaybackPlugin, RollbackAudioPlayer, RollbackAudioPlayerInstance,
-    RollbackAudioPlayerStartTime, RollbackAudioPlugin, RollbackAudioSystems,
+    RollbackAudioPlaybackPlugin, RollbackAudioPlayer, RollbackAudioPlayerExpiry,
+    RollbackAudioPlayerInstance, RollbackAudioPlugin, RollbackAudioSystems,
 };
 pub use frame_count::{increase_frame_count, RollFrameCount};
 pub use schedule::{
