@@ -33,6 +33,13 @@
 //!
 //! A resimulation that re-crosses the same edge spawns an intent with the same
 //! key, which matches the sound already playing, so it is not played twice.
+//!
+//! Playback can hold a sound back: [`RollbackAudioDelays`] maps an asset path
+//! to how long after its intent started the sound plays, on the same clock.
+//! It is presentation, not simulation: how a sound lines up with what is on
+//! screen, tuned without touching the rolled-back state. A delayed sound that
+//! a rollback undoes before it plays never plays, and one whose delay outlasts
+//! its intent's `keep_for` still plays once its time comes.
 
 use std::{borrow::Cow, marker::PhantomData, time::Duration};
 
@@ -117,8 +124,27 @@ impl<C> Default for RollbackAudioPlaybackPlugin<C> {
 
 impl<C: Default + Send + Sync + 'static> Plugin for RollbackAudioPlaybackPlugin<C> {
     fn build(&self, app: &mut App) {
+        app.init_resource::<RollbackAudioDelays>();
         app.add_systems(Update, sync_rollback_sounds::<C>);
     }
+}
+
+/// How long after its intent started each sound plays, by asset path; a path
+/// not listed plays at once. Presentation only: see the module docs.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct RollbackAudioDelays(pub HashMap<Cow<'static, str>, Duration>);
+
+impl RollbackAudioDelays {
+    /// The delay for `path`, zero when none is set.
+    pub fn get(&self, path: &str) -> Duration {
+        self.0.get(path).copied().unwrap_or_default()
+    }
+}
+
+/// When the sound for an intent plays: its start (`keep_for` before its
+/// expiry) plus its delay.
+fn play_at(expiry: Duration, keep_for: Duration, delay: Duration) -> Duration {
+    expiry.saturating_sub(keep_for) + delay
 }
 
 /// A one-shot sound the simulation declares, named by asset path.
@@ -194,47 +220,69 @@ pub fn expire_rollback_sounds(
     }
 }
 
-/// Play each intent not played yet, and cut the sound of one a rollback undid.
+/// Play each intent not played yet once its delay is up, and cut the sound of
+/// one a rollback undid.
 pub fn sync_rollback_sounds<C: Default + Send + Sync + 'static>(
     mut commands: Commands,
     intents: Query<(&RollbackAudioPlayer, &RollbackAudioPlayerExpiry)>,
     instances: Query<(), With<RollbackAudioPlayerInstance>>,
     now: Res<Time<C>>,
+    keep_for: Res<RollbackAudioKeepFor>,
+    delays: Res<RollbackAudioDelays>,
     asset_server: Res<AssetServer>,
-    mut played: Local<HashMap<(Cow<'static, str>, Duration), Entity>>,
+    // `None` while the sound waits out its delay.
+    mut played: Local<HashMap<(Cow<'static, str>, Duration), Option<Entity>>>,
 ) {
     let desired: HashSet<(Cow<'static, str>, Duration)> = intents
         .iter()
         .map(|(player, expiry)| (player.0.clone(), expiry.0))
         .collect();
+    for key in &desired {
+        played.entry(key.clone()).or_insert(None);
+    }
 
-    // Forget intents that are gone: cut the sound when a rollback or a seek
-    // undid it, let it play out when it expired.
     let now = now.elapsed();
     played.retain(|key, instance| {
-        if desired.contains(key) {
-            return true;
+        let live = desired.contains(key);
+        // Gone with its expiry still ahead: a rollback or a seek undid it.
+        // Cut the sound, or never play it.
+        if !live && key.1 > now {
+            if let Some(entity) = instance.filter(|e| instances.contains(*e)) {
+                commands.entity(entity).despawn();
+            }
+            return false;
         }
-        if key.1 > now && instances.contains(*instance) {
-            commands.entity(*instance).despawn();
+        if instance.is_none() && now >= play_at(key.1, keep_for.0, delays.get(&key.0)) {
+            *instance = Some(
+                commands
+                    .spawn((
+                        AudioPlayer::<AudioSource>(asset_server.load(key.0.to_string())),
+                        PlaybackSettings {
+                            mode: PlaybackMode::Despawn,
+                            ..default()
+                        },
+                        RollbackAudioPlayerInstance { expiry: key.1 },
+                    ))
+                    .id(),
+            );
         }
-        false
+        // Kept while its intent lives, and past that while it still waits to
+        // play; an expired one that played is let play out.
+        live || instance.is_none()
     });
+}
 
-    for key in desired {
-        if played.contains_key(&key) {
-            continue;
-        }
-        let instance = commands
-            .spawn((
-                AudioPlayer::<AudioSource>(asset_server.load(key.0.to_string())),
-                PlaybackSettings {
-                    mode: PlaybackMode::Despawn,
-                    ..default()
-                },
-                RollbackAudioPlayerInstance { expiry: key.1 },
-            ))
-            .id();
-        played.insert(key, instance);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sound_plays_its_delay_after_its_intent_started() {
+        let ms = Duration::from_millis;
+        // Started at 1000 ms, kept for 250, so it expires at 1250.
+        assert_eq!(play_at(ms(1250), ms(250), Duration::ZERO), ms(1000));
+        assert_eq!(play_at(ms(1250), ms(250), ms(150)), ms(1150));
+        // A delay past keep_for plays after the intent is gone.
+        assert_eq!(play_at(ms(1250), ms(250), ms(400)), ms(1400));
     }
 }
