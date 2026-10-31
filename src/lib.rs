@@ -149,7 +149,7 @@ mod ggrs_support {
         fn store(target: &Self::Target) -> Self::Stored {
             match target {
                 NextState::Unchanged => None,
-                NextState::Pending(s) | NextState::PendingIfNeq(s) => Some(s.to_owned()),
+                NextState::Pending(s) | NextState::PendingIfDifferent(s) => Some(s.to_owned()),
             }
         }
 
