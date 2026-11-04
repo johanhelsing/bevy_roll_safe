@@ -154,6 +154,7 @@ fn play_at(expiry: Duration, keep_for: Duration, delay: Duration) -> Duration {
 #[derive(Component, Clone, Debug, Reflect)]
 #[cfg_attr(feature = "bevy_ggrs", derive(bevy_ggrs::Rollback))]
 #[cfg_attr(feature = "bevy_ggrs", rollback(clone, marker))]
+#[cfg_attr(feature = "bevy_ggrs", component(summary_tick))]
 #[cfg_attr(feature = "bevy_ggrs", reflect(Component, Rollback))]
 #[cfg_attr(not(feature = "bevy_ggrs"), reflect(Component))]
 pub struct RollbackAudioPlayer(pub Cow<'static, str>);
@@ -170,6 +171,7 @@ impl RollbackAudioPlayer {
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[cfg_attr(feature = "bevy_ggrs", derive(bevy_ggrs::Rollback))]
 #[cfg_attr(feature = "bevy_ggrs", rollback(copy))]
+#[cfg_attr(feature = "bevy_ggrs", component(summary_tick))]
 #[cfg_attr(feature = "bevy_ggrs", reflect(Component, Rollback))]
 #[cfg_attr(not(feature = "bevy_ggrs"), reflect(Component))]
 pub struct RollbackAudioPlayerExpiry(pub Duration);
