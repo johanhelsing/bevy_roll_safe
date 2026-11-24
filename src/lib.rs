@@ -12,8 +12,8 @@ mod schedule;
 // re-exports
 #[cfg(feature = "audio")]
 pub use audio::{
-    expire_rollback_sounds, start_rollback_sounds, sync_rollback_sounds, RollbackAudioDelays,
-    RollbackAudioKeepFor, RollbackAudioPlaybackPlugin, RollbackAudioPlayer,
+    expire_rollback_sounds, start_rollback_sounds, sync_rollback_sounds, Nothing,
+    RollbackAudioDelays, RollbackAudioKeepFor, RollbackAudioPlaybackPlugin, RollbackAudioPlayer,
     RollbackAudioPlayerExpiry, RollbackAudioPlayerInstance, RollbackAudioPlugin,
     RollbackAudioSystems,
 };

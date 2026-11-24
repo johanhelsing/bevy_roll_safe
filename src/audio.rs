@@ -11,9 +11,10 @@
 //!   started, and despawns it once the clock reaches that. Add it wherever the
 //!   simulation runs, headless included.
 //! - [`RollbackAudioPlaybackPlugin`] (presentation): once per frame, plays
-//!   each intent it has not played yet, keyed by `(path, expiry)`. It
-//!   reads the simulation clock as `Time<C>`: a clock the game keeps in step
-//!   with the rollback schedule's `Time` and rolls back.
+//!   each intent it has not played yet, keyed by its path, its expiry and
+//!   its key, if it has one. It reads the simulation clock as `Time<C>`: a
+//!   clock the game keeps in step with the rollback schedule's `Time` and
+//!   rolls back.
 //!
 //! An intent lives only as long as a rollback could still take it back, which
 //! is what `keep_for` is: at least the longest rollback the session can do
@@ -33,6 +34,27 @@
 //!
 //! A resimulation that re-crosses the same edge spawns an intent with the same
 //! key, which matches the sound already playing, so it is not played twice.
+//! The key is what the intent holds, never its entity: a rollback takes the
+//! entity away and the resimulation spawns another.
+//!
+//! An intent is a path and nothing more, so two for one path on one tick
+//! are one sound. A game says more with two components of its own, spawned
+//! beside the [`RollbackAudioPlayer`] and named as the playback plugin's
+//! types ([`RollbackAudioPlaybackPlugin::new`]):
+//!
+//! - A **key** `K`: what tells two sounds of one path on one tick apart,
+//!   such as who made each. Two intents whose keys differ are two sounds.
+//!   Pick something a resimulation gives back the same, an index and never
+//!   a float out of the simulation: a key that comes back changed is a new
+//!   sound, and the one playing is cut. An intent with no key shares its
+//!   sound with every other of its path and tick that has none, which is a
+//!   choice too: one knock a tick however many things hit.
+//! - **Data** `D`: what the game wants to know of the sound when it plays,
+//!   such as where it is. It tells no two sounds apart. When a
+//!   resimulation declares the same sound with other data, the sound plays
+//!   on and takes the new data.
+//!
+//! Playback puts a clone of each on the sound it starts.
 //!
 //! Playback can hold a sound back: [`RollbackAudioDelays`] maps an asset path
 //! to how long after its intent started the sound plays, on the same clock.
@@ -43,11 +65,7 @@
 
 use std::{borrow::Cow, marker::PhantomData, time::Duration};
 
-use bevy::{
-    audio::PlaybackMode,
-    platform::collections::{HashMap, HashSet},
-    prelude::*,
-};
+use bevy::{audio::PlaybackMode, platform::collections::HashMap, prelude::*};
 #[cfg(feature = "bevy_ggrs")]
 use bevy_ggrs::ReflectRollback;
 
@@ -114,18 +132,44 @@ pub struct RollbackAudioSystems;
 /// world, so a seek or a rollback to an earlier tick takes it back too.
 /// Playback compares expiries against it. Needs [`RollbackAudioPlugin`]
 /// and Bevy's audio and asset plugins.
-pub struct RollbackAudioPlaybackPlugin<C>(PhantomData<C>);
+///
+/// `K` and `D` are the key and the data an intent may carry (see the
+/// module docs): components spawned beside its [`RollbackAudioPlayer`] and
+/// cloned onto the sound that plays for it. The key tells two sounds of one
+/// path on one tick apart; the data does not. `default()` reads neither;
+/// [`new`](Self::new) names them.
+pub struct RollbackAudioPlaybackPlugin<C, K = Nothing, D = Nothing>(PhantomData<(C, K, D)>);
 
+/// The key, or the data, of a playback plugin that reads none: `()` is no
+/// component. Nothing spawns it.
+#[derive(Component, Clone, PartialEq, Debug)]
+pub struct Nothing;
+
+// For `Nothing` alone, so `RollbackAudioPlaybackPlugin::<C>::default()`
+// names its type in full: a default type is not inferred in an expression.
 impl<C> Default for RollbackAudioPlaybackPlugin<C> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<C: Default + Send + Sync + 'static> Plugin for RollbackAudioPlaybackPlugin<C> {
+impl<C, K, D> RollbackAudioPlaybackPlugin<C, K, D> {
+    /// Playback that reads the key `K` and the data `D` off each intent
+    /// that carries them. [`Nothing`] for one a game has no use for.
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<C, K, D> Plugin for RollbackAudioPlaybackPlugin<C, K, D>
+where
+    C: Default + Send + Sync + 'static,
+    K: Component + Clone + PartialEq,
+    D: Component + Clone + PartialEq,
+{
     fn build(&self, app: &mut App) {
         app.init_resource::<RollbackAudioDelays>();
-        app.add_systems(Update, sync_rollback_sounds::<C>);
+        app.add_systems(Update, sync_rollback_sounds::<C, K, D>);
     }
 }
 
@@ -222,61 +266,268 @@ pub fn expire_rollback_sounds(
     }
 }
 
+/// A sound playback knows of, by what its intent held.
+pub struct PlayedSound<K, D> {
+    path: Cow<'static, str>,
+    expiry: Duration,
+    key: Option<K>,
+    data: Option<D>,
+    /// `None` while the sound waits out its delay.
+    instance: Option<Entity>,
+}
+
+impl<K: PartialEq, D> PlayedSound<K, D> {
+    fn is_for(&self, path: &str, expiry: Duration, key: Option<&K>) -> bool {
+        self.expiry == expiry && self.path == path && self.key.as_ref() == key
+    }
+}
+
 /// Play each intent not played yet once its delay is up, and cut the sound of
 /// one a rollback undid.
-pub fn sync_rollback_sounds<C: Default + Send + Sync + 'static>(
+pub fn sync_rollback_sounds<C, K, D>(
     mut commands: Commands,
-    intents: Query<(&RollbackAudioPlayer, &RollbackAudioPlayerExpiry)>,
+    intents: Query<(
+        &RollbackAudioPlayer,
+        &RollbackAudioPlayerExpiry,
+        Option<&K>,
+        Option<&D>,
+    )>,
     instances: Query<(), With<RollbackAudioPlayerInstance>>,
     now: Res<Time<C>>,
     keep_for: Res<RollbackAudioKeepFor>,
     delays: Res<RollbackAudioDelays>,
     asset_server: Res<AssetServer>,
-    // `None` while the sound waits out its delay.
-    mut played: Local<HashMap<(Cow<'static, str>, Duration), Option<Entity>>>,
-) {
-    let desired: HashSet<(Cow<'static, str>, Duration)> = intents
-        .iter()
-        .map(|(player, expiry)| (player.0.clone(), expiry.0))
-        .collect();
-    for key in &desired {
-        played.entry(key.clone()).or_insert(None);
+    mut played: Local<Vec<PlayedSound<K, D>>>,
+) where
+    C: Default + Send + Sync + 'static,
+    K: Component + Clone + PartialEq,
+    D: Component + Clone + PartialEq,
+{
+    for (player, expiry, key, data) in &intents {
+        if !played.iter().any(|p| p.is_for(&player.0, expiry.0, key)) {
+            played.push(PlayedSound {
+                path: player.0.clone(),
+                expiry: expiry.0,
+                key: key.cloned(),
+                data: data.cloned(),
+                instance: None,
+            });
+        }
     }
 
     let now = now.elapsed();
-    played.retain(|key, instance| {
-        let live = desired.contains(key);
+    played.retain_mut(|sound| {
+        // The data of each intent this sound is for.
+        let mut live = intents
+            .iter()
+            .filter(|(player, expiry, key, _)| sound.is_for(&player.0, expiry.0, *key))
+            .map(|(.., data)| data)
+            .peekable();
+        let is_live = live.peek().is_some();
         // Gone with its expiry still ahead: a rollback or a seek undid it.
         // Cut the sound, or never play it.
-        if !live && key.1 > now {
-            if let Some(entity) = instance.filter(|e| instances.contains(*e)) {
+        if !is_live && sound.expiry > now {
+            if let Some(entity) = sound.instance.filter(|e| instances.contains(*e)) {
                 commands.entity(entity).despawn();
             }
             return false;
         }
-        if instance.is_none() && now >= play_at(key.1, keep_for.0, delays.get(&key.0)) {
-            *instance = Some(
-                commands
-                    .spawn((
-                        AudioPlayer::<AudioSource>(asset_server.load(key.0.to_string())),
-                        PlaybackSettings {
-                            mode: PlaybackMode::Despawn,
-                            ..default()
-                        },
-                        RollbackAudioPlayerInstance { expiry: key.1 },
-                    ))
-                    .id(),
+        // None of its intents holds the data it has: a resimulation
+        // declared it anew with other data. It plays on and takes the new.
+        // While one of them still does it keeps what it has, so a sound
+        // several intents share does not hop between theirs.
+        if let Some(&first) = live.peek() {
+            if !live.any(|data| data == sound.data.as_ref()) {
+                sound.data = first.cloned();
+                if let (Some(entity), Some(data)) = (
+                    sound.instance.filter(|e| instances.contains(*e)),
+                    &sound.data,
+                ) {
+                    commands.entity(entity).insert(data.clone());
+                }
+            }
+        }
+        if sound.instance.is_none()
+            && now >= play_at(sound.expiry, keep_for.0, delays.get(&sound.path))
+        {
+            let playing = (
+                AudioPlayer::<AudioSource>(asset_server.load(sound.path.to_string())),
+                PlaybackSettings {
+                    mode: PlaybackMode::Despawn,
+                    ..default()
+                },
+                RollbackAudioPlayerInstance {
+                    expiry: sound.expiry,
+                },
             );
+            // In one spawn, so whatever watches for the sound finds its key
+            // and its data on it.
+            sound.instance = Some(match (&sound.key, &sound.data) {
+                (Some(key), Some(data)) => {
+                    commands.spawn((playing, key.clone(), data.clone())).id()
+                }
+                (Some(key), None) => commands.spawn((playing, key.clone())).id(),
+                (None, Some(data)) => commands.spawn((playing, data.clone())).id(),
+                (None, None) => commands.spawn(playing).id(),
+            });
         }
         // Kept while its intent lives, and past that while it still waits to
         // play; an expired one that played is let play out.
-        live || instance.is_none()
+        is_live || sound.instance.is_none()
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Who made a sound: a game's key.
+    #[derive(Component, Clone, PartialEq, Debug)]
+    struct Maker(u32);
+
+    /// Where a sound is: a game's data.
+    #[derive(Component, Clone, PartialEq, Debug)]
+    struct Place(i32);
+
+    const KEEP_FOR: Duration = Duration::from_millis(250);
+
+    /// Playback that reads [`Maker`] and [`Place`], with the clock at one
+    /// second and no audio device: a sound is the entity playback spawns
+    /// for it.
+    fn playback() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()));
+        app.init_asset::<AudioSource>();
+        app.insert_resource(RollbackAudioKeepFor(KEEP_FOR));
+        app.add_plugins(RollbackAudioPlaybackPlugin::<Fixed, Maker, Place>::new());
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .advance_by(Duration::from_secs(1));
+        app
+    }
+
+    /// An intent for `jump.ogg` started now, by `maker` at `place`, when
+    /// given.
+    fn declare(app: &mut App, maker: Option<u32>, place: Option<i32>) -> Entity {
+        let expiry = app.world().resource::<Time<Fixed>>().elapsed() + KEEP_FOR;
+        let mut intent = app.world_mut().spawn((
+            RollbackAudioPlayer::new("jump.ogg"),
+            RollbackAudioPlayerExpiry(expiry),
+        ));
+        if let Some(maker) = maker {
+            intent.insert(Maker(maker));
+        }
+        if let Some(place) = place {
+            intent.insert(Place(place));
+        }
+        intent.id()
+    }
+
+    /// Each sound playing, with the key and the data on it, sorted.
+    fn sounds(app: &mut App) -> Vec<(Entity, Option<u32>, Option<i32>)> {
+        let world = app.world_mut();
+        let mut sounds: Vec<_> = world
+            .query_filtered::<(Entity, Option<&Maker>, Option<&Place>), With<RollbackAudioPlayerInstance>>()
+            .iter(world)
+            .map(|(sound, maker, place)| (sound, maker.map(|m| m.0), place.map(|p| p.0)))
+            .collect();
+        sounds.sort_by_key(|&(_, maker, place)| (maker, place));
+        sounds
+    }
+
+    /// The key and the data on each sound playing, sorted.
+    fn heard(app: &mut App) -> Vec<(Option<u32>, Option<i32>)> {
+        sounds(app)
+            .into_iter()
+            .map(|(_, maker, place)| (maker, place))
+            .collect()
+    }
+
+    #[test]
+    fn a_sound_carries_its_intents_key_and_data() {
+        let mut app = playback();
+        declare(&mut app, Some(3), Some(7));
+        app.update();
+        assert_eq!(heard(&mut app), [(Some(3), Some(7))]);
+    }
+
+    #[test]
+    fn an_intent_with_neither_plays_as_before() {
+        let mut app = playback();
+        declare(&mut app, None, None);
+        app.update();
+        assert_eq!(heard(&mut app), [(None, None)]);
+    }
+
+    #[test]
+    fn two_intents_on_one_tick_are_two_sounds_when_their_keys_differ() {
+        let mut app = playback();
+        declare(&mut app, Some(1), Some(10));
+        declare(&mut app, Some(2), Some(20));
+        app.update();
+        assert_eq!(heard(&mut app), [(Some(1), Some(10)), (Some(2), Some(20))]);
+    }
+
+    /// Data tells no two sounds apart: with no key, or one key, two intents
+    /// are one sound wherever each says it is.
+    #[test]
+    fn two_intents_with_one_key_or_none_are_one_sound_whatever_their_data() {
+        for maker in [None, Some(1)] {
+            let mut app = playback();
+            declare(&mut app, maker, Some(10));
+            declare(&mut app, maker, Some(20));
+            app.update();
+            let playing = heard(&mut app);
+            assert_eq!(playing.len(), 1, "{maker:?}: {playing:?}");
+            // It keeps the data it took, on every frame after.
+            for _ in 0..3 {
+                app.update();
+                assert_eq!(heard(&mut app), playing, "{maker:?}");
+            }
+        }
+    }
+
+    /// A rollback takes the intent away and the resimulation spawns it
+    /// again, a new entity with the same key: the sound plays on, once.
+    #[test]
+    fn a_resimulated_intent_matches_the_sound_already_playing() {
+        let mut app = playback();
+        let intent = declare(&mut app, Some(1), Some(10));
+        app.update();
+        let first = sounds(&mut app);
+        app.world_mut().despawn(intent);
+        declare(&mut app, Some(1), Some(10));
+        app.update();
+        assert_eq!(sounds(&mut app), first);
+    }
+
+    /// The resimulation puts the same sound somewhere else: it is the same
+    /// sound, playing on, with the new data.
+    #[test]
+    fn a_resimulated_intent_with_other_data_moves_the_sound_and_does_not_restart_it() {
+        let mut app = playback();
+        let intent = declare(&mut app, Some(1), Some(10));
+        app.update();
+        let first = sounds(&mut app)[0].0;
+        app.world_mut().despawn(intent);
+        declare(&mut app, Some(1), Some(12));
+        app.update();
+        app.update();
+        assert_eq!(sounds(&mut app), [(first, Some(1), Some(12))]);
+    }
+
+    /// A rollback that undoes one of two intents cuts its sound and leaves
+    /// the other's.
+    #[test]
+    fn an_undone_intent_cuts_its_own_sound_and_no_other() {
+        let mut app = playback();
+        let undone = declare(&mut app, Some(1), Some(10));
+        declare(&mut app, Some(2), Some(20));
+        app.update();
+        app.world_mut().despawn(undone);
+        app.update();
+        assert_eq!(heard(&mut app), [(Some(2), Some(20))]);
+    }
 
     #[test]
     fn a_sound_plays_its_delay_after_its_intent_started() {
